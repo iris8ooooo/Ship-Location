@@ -1,0 +1,54 @@
+name: Deploy to Cloud Run
+
+# 이 워크플로는 기존 Cloud Run 서비스에 "새 리비전"만 올린다.
+# 서비스 이름 / 리전 / 프로젝트가 그대로이므로 공개 URL은 한 글자도 바뀌지 않는다:
+#   https://hd-ship-location-238928524992.us-west1.run.app
+#
+# 절대 바꾸지 말 것 (바꾸면 URL이 달라진다):
+#   SERVICE, REGION, 그리고 GCP_PROJECT_ID 시크릿
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  SERVICE: hd-ship-location
+  REGION: us-west1
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy new revision to the existing service
+        run: |
+          gcloud run deploy "$SERVICE" \
+            --source . \
+            --region "$REGION" \
+            --project "${{ secrets.GCP_PROJECT_ID }}" \
+            --allow-unauthenticated \
+            --quiet
+
+      - name: Print the (unchanged) service URL
+        run: |
+          gcloud run services describe "$SERVICE" \
+            --region "$REGION" \
+            --project "${{ secrets.GCP_PROJECT_ID }}" \
+            --format='value(status.url)'
