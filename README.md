@@ -9,33 +9,48 @@ Google AI Studio에서 만들어 Cloud Run에 배포했고, 지금은 소스를 
 
 ## 🔒 URL 계약 — 가장 중요한 규칙
 
-서비스 주소는 **바뀌면 안 된다**:
+이 서비스에는 **주소가 두 개** 붙어 있고, 둘 다 같은 서비스로 연결된다.
 
 ```
-https://hd-ship-location-238928524992.us-west1.run.app
+https://hd-ship-location-ye4a2fuyhq-uw.a.run.app          ← 해시 형식 (gcloud가 보고하는 주소)
+https://hd-ship-location-238928524992.us-west1.run.app    ← 결정적 형식
 ```
 
-Cloud Run의 공개 URL은 `서비스명-프로젝트번호.리전.run.app` 규칙으로 결정되고,
-**새 리비전을 배포해도 URL은 바뀌지 않는다.** 따라서 아래 세 값만 고정하면 주소는 영구히 유지된다.
+Cloud Run은 모든 서비스에 **해시 기반 주소**를 부여하고, 서비스 이름 길이가 허용되면
+`서비스명-프로젝트번호.리전.run.app` 형태의 **결정적 주소**를 추가로 부여한다.
+두 주소 모두 배포 후 안정적이며, **새 리비전을 배포해도 바뀌지 않는다.**
+
+따라서 아래 세 값만 고정하면 두 주소 모두 그대로 유지된다.
 
 | 항목 | 값 | 바꾸면? |
 |---|---|---|
-| 서비스명 | `hd-ship-location` | ❌ URL 변경 |
-| 리전 | `us-west1` | ❌ URL 변경 |
-| 프로젝트 | `lng-works-482811` (번호 `238928524992`) | ❌ URL 변경 |
+| 서비스명 | `hd-ship-location` | ❌ 주소 변경 |
+| 리전 | `us-west1` | ❌ 주소 변경 |
+| 프로젝트 | `lng-works-482811` (번호 `238928524992`) | ❌ 주소 변경 |
 
-### 하지 말아야 할 것
+### 🚨 서비스를 절대 삭제하지 말 것
 
-- ❌ **Cloud Run 서비스를 삭제하지 말 것.** 리비전 교체는 안전하지만 서비스 삭제는 위험하다.
+리비전 교체는 안전하다. 하지만 **서비스 삭제는 되돌릴 수 없다.**
+
+결정적 주소는 이름·프로젝트번호·리전에서 계산되므로 같은 이름으로 다시 만들면 복원된다.
+그러나 **해시 주소의 `ye4a2fuyhq` 부분은 무작위로 생성된 값이라 재현할 방법이 없다.**
+서비스를 지우는 순간 이 주소는 영영 사라진다. 이 주소를 북마크해 둔 사람들의 링크가 전부 죽는다.
+
+배포 워크플로에는 이를 막는 장치가 두 겹으로 들어 있다.
+
+1. 배포 **전에** 서비스가 실제로 존재하는지 확인하고, 없으면 아무것도 하지 않고 실패한다.
+   (없는 상태로 배포하면 새 서비스가 만들어지면서 주소가 달라진다)
+2. 배포 **후에** 주소 목록을 다시 조회해 배포 전과 비교하고, 하나라도 달라졌으면 실패시킨다.
+
+### 그 밖에 하지 말아야 할 것
+
 - ❌ **Vercel / GitHub Pages 등 다른 호스팅으로 옮기지 말 것.** `run.app` 도메인은 Google 소유라
   DNS를 다른 곳으로 돌릴 방법이 없다. 주소를 지키려면 반드시 Cloud Run에 계속 배포해야 한다.
 - ❌ **AI Studio에서 "Update app" 버튼을 누르지 말 것.** 이 저장소의 배포를 통째로 덮어쓴다.
   이 저장소로 옮긴 뒤에는 배포 경로를 GitHub push 하나로만 유지한다.
 
 > 주소를 호스팅과 무관하게 만들고 싶다면 방법은 하나뿐이다 — **직접 소유한 도메인**을 사서
-> Cloud Run에 매핑하는 것. 그러면 나중에 어디로 옮기든 주소를 그대로 쓸 수 있다.
-
----
+> Cloud Run에 매핑하는 것. 해시 주소에 의존하지 않게 되므로 삭제 위험에서도 벗어난다.
 
 ## ⚠️ 알려진 보안 문제 — Firestore 규칙이 열려 있다
 
@@ -103,45 +118,27 @@ function isAdmin() {
 
 ### GCP 1회 설정
 
+`scripts/setup-gcp.sh` 가 전부 처리한다. **로컬에 gcloud를 설치할 필요 없이** Google Cloud Shell에서 돌리는 게 제일 쉽다.
+
+1. <https://console.cloud.google.com> 접속
+2. 우측 상단 터미널 아이콘으로 **Cloud Shell** 열기
+3. 실행:
+
 ```bash
-export PROJECT_ID=lng-works-482811
-export PROJECT_NUMBER=238928524992
-export REPO=iris8ooooo/Ship-Location
-
-gcloud services enable \
-  run.googleapis.com cloudbuild.googleapis.com \
-  artifactregistry.googleapis.com iamcredentials.googleapis.com \
-  --project="$PROJECT_ID"
-
-gcloud iam service-accounts create github-deployer \
-  --display-name="GitHub Actions deployer" --project="$PROJECT_ID"
-
-SA="github-deployer@${PROJECT_ID}.iam.gserviceaccount.com"
-
-for ROLE in roles/run.admin roles/cloudbuild.builds.editor \
-            roles/artifactregistry.admin roles/storage.admin \
-            roles/iam.serviceAccountUser
-do
-  gcloud projects add-iam-policy-binding "$PROJECT_ID" \
-    --member="serviceAccount:${SA}" --role="$ROLE"
-done
-
-# Workload Identity Federation (키 파일 없이 인증)
-gcloud iam workload-identity-pools create github \
-  --location=global --display-name="GitHub Actions" --project="$PROJECT_ID"
-
-gcloud iam workload-identity-pools providers create-oidc github \
-  --location=global --workload-identity-pool=github --display-name="GitHub" \
-  --attribute-mapping="google.subject=assertion.sub,attribute.repository=assertion.repository" \
-  --attribute-condition="assertion.repository=='${REPO}'" \
-  --issuer-uri="https://token.actions.githubusercontent.com" \
-  --project="$PROJECT_ID"
-
-gcloud iam service-accounts add-iam-policy-binding "$SA" \
-  --role=roles/iam.workloadIdentityUser \
-  --member="principalSet://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/github/attribute.repository/${REPO}" \
-  --project="$PROJECT_ID"
+git clone https://github.com/iris8ooooo/Ship-Location.git
+cd Ship-Location
+bash scripts/setup-gcp.sh
 ```
+
+스크립트가 하는 일:
+
+- **먼저 `hd-ship-location` 서비스가 `us-west1` / `lng-works-482811` 에 실제로 있는지 확인하고,
+  없으면 중단한다.** 잘못된 위치에 배포해서 새 서비스가 생기고 URL이 바뀌는 사고를 막기 위한 것이다.
+- 필요한 API 활성화, 배포용 서비스 계정 생성 및 권한 부여
+- Workload Identity Federation 설정 (키 파일 없이 인증, 이 저장소로만 제한)
+- 마지막에 GitHub에 등록할 시크릿 3개를 값과 함께 출력
+
+여러 번 실행해도 안전하다. 이미 만들어진 리소스는 건너뛴다.
 
 **Settings → Secrets and variables → Actions**에 등록:
 

@@ -51,6 +51,22 @@ jobs:
         if: steps.precheck.outputs.ready == 'true'
         uses: google-github-actions/setup-gcloud@v2
 
+      # 배포 전에 서비스가 실제로 존재하는지 확인한다.
+      # 없는 상태로 배포하면 새 서비스가 만들어지고 URL이 영구히 달라진다.
+      - name: Record service URLs before deploying
+        if: steps.precheck.outputs.ready == 'true'
+        id: before
+        run: |
+          URLS="$(gcloud run services describe "$SERVICE" \
+            --region "$REGION" --project "${{ secrets.GCP_PROJECT_ID }}" \
+            --format='get(status.url,status.urls)' 2>/dev/null | tr -s '[:space:]' ' ' | sed 's/ $//')"
+          if [ -z "$URLS" ]; then
+            echo "::error::Service '$SERVICE' was not found in $REGION. Deploying now would create a NEW service under a different URL. Aborting before any change is made."
+            exit 1
+          fi
+          echo "urls=$URLS" >> "$GITHUB_OUTPUT"
+          echo "Before deploy: $URLS"
+
       - name: Deploy new revision to the existing service
         if: steps.precheck.outputs.ready == 'true'
         run: |
@@ -61,10 +77,18 @@ jobs:
             --allow-unauthenticated \
             --quiet
 
-      - name: Print the (unchanged) service URL
+      # 배포 후 주소가 그대로인지 검증한다. 달라졌다면 즉시 빨간불로 알린다.
+      - name: Verify the service URLs did not change
         if: steps.precheck.outputs.ready == 'true'
         run: |
-          gcloud run services describe "$SERVICE" \
-            --region "$REGION" \
-            --project "${{ secrets.GCP_PROJECT_ID }}" \
-            --format='value(status.url)'
+          AFTER="$(gcloud run services describe "$SERVICE" \
+            --region "$REGION" --project "${{ secrets.GCP_PROJECT_ID }}" \
+            --format='get(status.url,status.urls)' | tr -s '[:space:]' ' ' | sed 's/ $//')"
+          BEFORE="${{ steps.before.outputs.urls }}"
+          echo "Before: $BEFORE"
+          echo "After : $AFTER"
+          if [ "$AFTER" != "$BEFORE" ]; then
+            echo "::error::The service URL changed during this deploy. Before: $BEFORE / After: $AFTER"
+            exit 1
+          fi
+          echo "::notice::URL unchanged — $AFTER"
