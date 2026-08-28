@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState, PointerEvent as ReactP
 import { collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, addDoc, query, orderBy, limit } from 'firebase/firestore';
 import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User } from 'firebase/auth';
 import { db, auth } from './firebase';
+import YardMap, { YARD_REGIONS, type YardRegion } from './components/YardMap';
 
 enum OperationType {
   CREATE = 'create',
@@ -53,7 +54,7 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
   console.error('Firestore Error: ', JSON.stringify(errInfo));
   throw new Error(JSON.stringify(errInfo));
 }
-import { RotateCcw, X, MessageSquare, SlidersHorizontal, ChevronUp, ChevronDown, Droplets, ArrowUpCircle, ArrowDownCircle, Lock, Unlock, ZoomIn, ZoomOut } from 'lucide-react';
+import { RotateCcw, X, MessageSquare, Plus, Waves, ChevronUp, ChevronDown, Droplets, ArrowUpCircle, ArrowDownCircle, Lock, Unlock } from 'lucide-react';
 
 interface ShipData {
   x: number;
@@ -101,9 +102,8 @@ export default function App() {
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   // 세로 공간이 좁은 화면(폰 가로 등)에서는 패널이 지도를 통째로 덮으므로
   // 처음부터 접어둔다. 넉넉한 화면에서는 펼친 채로 시작한다.
-  const [panelsOpen, setPanelsOpen] = useState(
-    () => typeof window === 'undefined' ? true : window.innerHeight >= 600
-  );
+  // 패널은 한 번에 하나만 연다. 기본은 닫힘 — 지도가 주인공이다.
+  const [openPanel, setOpenPanel] = useState<null | 'info' | 'add'>(null);
   const [infoTab, setInfoTab] = useState<'tide' | 'wind'>('tide');
   const [windData, setWindData] = useState<{speed: number, direction: string, degrees: number, time: string, hourly: { speeds: number[] }} | null>(null);
   const [tideData, setTideData] = useState<TideInfo | null>(null);
@@ -129,18 +129,20 @@ export default function App() {
     // 크기가 나올 때까지 몇 프레임 기다린다.
     const apply = () => {
       const vw = node.clientWidth, vh = node.clientHeight;
-      if (!vw || !vh) {
-        if (tries++ < 30) requestAnimationFrame(apply);
+      // 높이가 아직 화면의 절반도 안 되면 레이아웃이 덜 잡힌 것이다.
+      // 이때 배율을 굳히면 지도가 화면보다 작아져 아래에 빈 띠가 생긴다.
+      const settled = vw > 0 && vh > 0 && vh >= window.innerHeight * 0.6;
+      if (!settled) {
+        if (tries++ < 60) requestAnimationFrame(apply);
         return;
       }
       didInitView.current = true;
       // 가로로 논리 좌표 약 1400 폭이 들어오도록 잡는다. 세로가 아니라 가로를
       // 기준으로 삼는 이유는, 야드가 가로로 길어서 세로에 맞추면 폭이 너무
       // 좁게 잘리기 때문이다. 위아래 여백은 패널이 어차피 덮는다.
-      // 가로로는 논리 좌표 약 1400 폭이 들어오게 하되, 세로로 화면보다 지도가
-      // 짧아져 배경이 드러나는 일이 없도록 세로를 덮는 배율을 하한으로 둔다.
-      const MAP_H = 1400;
-      const z = Math.max(0.4, Math.min(1.1, Math.max(vw / 1400, vh / MAP_H)));
+      // 가로로 논리 좌표 약 1600 폭이 들어오게 잡아 야드 전체가 한눈에 보이게 한다.
+      // 세로가 남아도 뷰포트 배경이 바다와 같은 색이라 이음매가 보이지 않는다.
+      const z = Math.max(0.3, Math.min(0.9, vw / 1600));
       setZoom(z);
       requestAnimationFrame(() => {
         // 도크와 안벽이 있는 작업 구간(논리 y 150 부터)을 화면 위에 둔다.
@@ -152,6 +154,59 @@ export default function App() {
   }, []);
   const pinchRef = useRef<{ dist: number, zoom: number } | null>(null);
   const tapTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // 애니메이션 중에는 현재 배율을 ref 로 읽는다(클로저가 옛 값을 잡지 않도록).
+  const zoomRef = useRef(zoom);
+  useEffect(() => { zoomRef.current = zoom; }, [zoom]);
+  const flyingRef = useRef(false);
+
+  /** 지역 버튼 → 그 구역이 화면에 꽉 차도록 배율과 위치를 동시에 움직인다.
+   *
+   *  setZoom 을 부르고 곧바로 scrollTo 를 걸면 안 된다. 그 시점의 스크롤 범위는
+   *  아직 이전 배율 기준이라 목표가 잘린다(실측: 목표 946 → 410에서 멈춤).
+   *  그래서 애니메이션 동안에는 React 를 거치지 않고 DOM 을 직접 만지고,
+   *  끝난 뒤에 최종 배율만 상태로 반영한다. */
+  const flyTo = useCallback((r: YardRegion) => {
+    const node = viewportRef.current;
+    const inner = containerRef.current;
+    const wrap = inner?.parentElement as HTMLElement | null;
+    if (!node || !inner || !wrap || flyingRef.current) return;
+
+    const vw = node.clientWidth, vh = node.clientHeight;
+    const PAD = 1.18;                                  // 구역 가장자리 여유
+    const z1 = Math.max(0.3, Math.min(2.2, Math.min(vw / (r.w * PAD), vh / (r.h * PAD))));
+    const z0 = zoomRef.current;
+    const sl0 = node.scrollLeft, st0 = node.scrollTop;
+    const cx = r.x + r.w / 2, cy = r.y + r.h / 2;
+
+    flyingRef.current = true;
+    const prevTransition = inner.style.transition;
+    inner.style.transition = 'none';                   // CSS 전환과 겹치지 않게
+
+    const DUR = 620;
+    const t0 = performance.now();
+    const easeInOutCubic = (t: number) =>
+      t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+
+    const step = (now: number) => {
+      const p = Math.min(1, (now - t0) / DUR);
+      const e = easeInOutCubic(p);
+      const z = z0 + (z1 - z0) * e;
+
+      // 크기를 먼저 넓힌 뒤 스크롤해야 목표가 잘리지 않는다.
+      wrap.style.width = `${2000 * z}px`;
+      wrap.style.height = `${1400 * z}px`;
+      inner.style.transform = `scale(${z})`;
+      node.scrollLeft = Math.max(0, cx * z - vw / 2);
+      node.scrollTop  = Math.max(0, cy * z - vh / 2);
+
+      if (p < 1) { requestAnimationFrame(step); return; }
+      inner.style.transition = prevTransition;
+      flyingRef.current = false;
+      setZoom(z1);                                     // 최종 상태만 React 에 반영
+    };
+    requestAnimationFrame(step);
+  }, []);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -826,18 +881,18 @@ export default function App() {
 
 
 
-      {/* 패널 도크 — 조석/바람 패널과 배 추가 패널을 한 덩어리로 묶는다.
-          폰 세로: 화면 아래에 가로로 눕는다.
-          md 이상(아이패드·데스크톱): 오른쪽에 좁은 세로 패널로 붙어 지도를 넓게 쓴다.
-          접으면 화면 밖으로 밀려나 지도를 전혀 가리지 않는다. */}
+      {/* 열린 패널 하나만 시트로 띄운다.
+          폰: 아래에서 올라오는 시트. md 이상: 오른쪽 FAB 옆에 붙는 패널.
+          닫혀 있으면 렌더 자체를 안 해서 지도를 조금도 가리지 않는다. */}
       <div
-        className={`fixed z-40 flex flex-col gap-2 transition-transform duration-300 ease-out
-          left-2 right-2 bottom-[calc(3.5rem+env(safe-area-inset-bottom))]
-          md:left-auto md:right-2 md:top-16 md:bottom-auto md:w-[330px]
-          ${panelsOpen ? '' : 'translate-y-[135%] md:translate-y-0 md:translate-x-[115%]'}`}
+        className={`fixed z-40 flex flex-col gap-2 transition-all duration-300 ease-out
+          left-2 right-2 bottom-[calc(6.5rem+env(safe-area-inset-bottom))]
+          md:left-auto md:right-20 md:top-24 md:bottom-auto md:w-[340px]
+          ${openPanel ? 'opacity-100 translate-y-0' : 'pointer-events-none opacity-0 translate-y-4'}`}
       >
       {/* Info Panel (Tide / Wind) */}
-      <div className={`bg-white/95 p-3 rounded-lg shadow-md flex flex-col gap-1.5 w-auto transition-all`}>
+      {openPanel === 'info' && (
+      <div className="bg-white/95 backdrop-blur p-3 rounded-2xl shadow-xl flex flex-col gap-1.5 w-auto">
         <div className="flex justify-between items-center border-b border-gray-200 pb-1">
           <div className="flex gap-3">
             <button 
@@ -928,10 +983,11 @@ export default function App() {
           </>
         )}
       </div>
+      )}
 
       {/* Add Ship Panel */}
-      {appMode === 'admin' && (
-        <div className="bg-white/95 p-3 rounded-lg shadow-md grid grid-cols-2 md:grid-cols-1 gap-2 items-center">
+      {appMode === 'admin' && openPanel === 'add' && (
+        <div className="bg-white/95 backdrop-blur p-3 rounded-2xl shadow-xl grid grid-cols-2 md:grid-cols-1 gap-2 items-center">
           <select 
             value={newShipColor} 
             onChange={e => setNewShipColor(e.target.value)}
@@ -964,27 +1020,44 @@ export default function App() {
       )}
       </div>
 
-      {/* Zoom Controls */}
-      <div className="fixed right-3 top-1/2 -translate-y-1/2 z-50 flex flex-col gap-2">
+      {/* 오른쪽 FAB 열. 확대/축소 버튼은 없앴다 — 확대는 아래 지역 버튼과
+          두 손가락 핀치(데스크톱은 휠)로 한다. */}
+      <div className="fixed right-3 top-1/2 -translate-y-1/2 z-50 flex flex-col gap-3">
         <button
-          onClick={() => setPanelsOpen(o => !o)}
-          aria-label={panelsOpen ? '패널 접기' : '패널 펼치기'}
-          className={`w-10 h-10 shadow-lg rounded-full flex items-center justify-center border transition-colors ${panelsOpen ? 'bg-blue-500 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}`}
+          onClick={() => setOpenPanel(p => p === 'info' ? null : 'info')}
+          aria-label="조석·바람"
+          className={`w-14 h-14 shadow-xl rounded-full flex items-center justify-center border transition-all active:scale-95 ${openPanel === 'info' ? 'bg-blue-600 text-white border-blue-700' : 'bg-white/95 backdrop-blur text-blue-600 border-gray-200'}`}
         >
-          <SlidersHorizontal size={20} />
+          <Waves size={26} />
         </button>
-        <button
-          onClick={() => setZoom(z => Math.min(3, z + 0.2))}
-          className="w-10 h-10 bg-white shadow-lg rounded-full flex items-center justify-center text-gray-700 hover:bg-gray-50 hover:text-blue-600 border border-gray-200 transition-colors"
-        >
-          <ZoomIn size={24} />
-        </button>
-        <button
-          onClick={() => setZoom(z => Math.max(0.2, z - 0.2))}
-          className="w-10 h-10 bg-white shadow-lg rounded-full flex items-center justify-center text-gray-700 hover:bg-gray-50 hover:text-blue-600 border border-gray-200 transition-colors"
-        >
-          <ZoomOut size={24} />
-        </button>
+        {appMode === 'admin' && (
+          <button
+            onClick={() => setOpenPanel(p => p === 'add' ? null : 'add')}
+            aria-label="배 추가"
+            className={`w-14 h-14 shadow-xl rounded-full flex items-center justify-center border transition-all active:scale-95 ${openPanel === 'add' ? 'bg-blue-600 text-white border-blue-700' : 'bg-white/95 backdrop-blur text-blue-600 border-gray-200'}`}
+          >
+            <Plus size={28} />
+          </button>
+        )}
+      </div>
+
+      {/* 지역 바로가기. 누르면 그 구역으로 부드럽게 확대 이동한다.
+          하단 이력 바 바로 위, 엄지가 닿는 자리에 둔다. */}
+      <div
+        style={{ bottom: 'calc(3rem + env(safe-area-inset-bottom))' }}
+        className="fixed left-0 right-0 z-40 px-2 pb-2 overflow-x-auto"
+      >
+        <div className="flex gap-2 w-max mx-auto">
+          {YARD_REGIONS.map(r => (
+            <button
+              key={r.id}
+              onClick={() => flyTo(r)}
+              className="px-4 h-10 shrink-0 rounded-full bg-white/95 backdrop-blur text-gray-800 text-sm font-bold shadow-lg border border-gray-200 active:scale-95 active:bg-blue-50 transition-all"
+            >
+              {r.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {isAddingZone && appMode === 'admin' && (
@@ -998,7 +1071,7 @@ export default function App() {
       {/* Viewport */}
       <div 
         ref={attachViewport}
-        className="flex-1 overflow-auto relative touch-pan-x touch-pan-y"
+        className="flex-1 overflow-auto relative touch-pan-x touch-pan-y bg-[#9fc9e4]"
         onPointerDown={handleBackgroundPointerDown}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
@@ -1011,15 +1084,11 @@ export default function App() {
         >
           <div 
             ref={containerRef}
-            className={`relative w-[2000px] h-[1400px] bg-gray-300 origin-top-left ${isPinching ? '' : 'transition-transform duration-200 ease-out'}`}
-            style={{
-              backgroundImage: "url('/map.jpg?v=2')",
-              backgroundSize: '100% 100%',
-              backgroundRepeat: 'no-repeat',
-              transform: `scale(${zoom}) rotate(-0.1deg)`
-            }}
+            className={`relative w-[2000px] h-[1400px] origin-top-left ${isPinching ? '' : 'transition-transform duration-300 ease-out'}`}
+            style={{ transform: `scale(${zoom})` }}
             onClick={handleMapClick}
           >
+            <YardMap />
           {Object.keys(zones).map((id) => {
             const zone = zones[id];
             const isSelected = selectedZoneId === id;
