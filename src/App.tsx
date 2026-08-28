@@ -1169,7 +1169,7 @@ export default function App() {
               <div
                 id={`zone-${id}`}
                 key={id}
-                className={`zone absolute w-[26px] h-[92px] border-2 border-dashed rounded-[50%_50%_8px_8px] flex flex-col items-center justify-center select-none touch-none transition-transform duration-300
+                className={`zone absolute w-[26px] h-[130px] border-2 border-dashed rounded-[50%_50%_8px_8px] flex flex-col items-center justify-center select-none touch-none transition-transform duration-300
                   ${appMode === 'admin' ? (zone.isLocked ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing active:z-[999]') : 'pointer-events-none'}
                   ${isSelected && appMode === 'admin' ? 'border-red-600 bg-red-500/40 z-20 shadow-[0_0_15px_rgba(239,68,68,0.5)]' : 'border-orange-500 bg-orange-500/30 z-0'}
                   ${zone.isLocked ? 'border-gray-500 bg-gray-500/30' : ''}
@@ -1222,7 +1222,7 @@ export default function App() {
               <div
                 id={`ship-${id}`}
                 key={id}
-                className={`absolute w-[26px] h-[92px] select-none touch-none transition-transform duration-300
+                className={`absolute w-[26px] h-[130px] select-none touch-none transition-transform duration-300
                   ${appMode === 'admin' ? 'cursor-grab active:cursor-grabbing active:z-[999]' : 'cursor-default'}
                   ${isSelected && appMode === 'admin' ? 'z-[100]' : 'z-10'}
                 `}
@@ -1245,28 +1245,28 @@ export default function App() {
                   `}
                 >
                   {/* Ship Details - Deck / Cargo Area */}
-                <div className="absolute inset-x-1 top-12 bottom-12 border-x-2 border-black/10 rounded-sm pointer-events-none"></div>
+                <div className="absolute inset-x-1 top-8 bottom-8 border-x-2 border-black/10 rounded-sm pointer-events-none"></div>
                 
                 {/* Ship Details - Bridge (Cabin) */}
-                <div className="absolute bottom-3 w-[35px] h-[25px] bg-black/20 border-t-2 border-b-4 border-black/30 rounded-sm pointer-events-none flex items-center justify-center">
-                  <div className="w-[20px] h-[5px] bg-black/20 rounded-full"></div>
+                <div className="absolute bottom-2 w-[20px] h-[18px] bg-black/20 border-t-2 border-b-4 border-black/30 rounded-sm pointer-events-none flex items-center justify-center">
+                  <div className="w-[12px] h-[3px] bg-black/20 rounded-full"></div>
                 </div>
 
                 {/* Ship Details - Bow mark */}
-                <div className="absolute top-2 w-[10px] h-[10px] border-t-2 border-black/20 rounded-full pointer-events-none"></div>
+                <div className="absolute top-1 w-[7px] h-[7px] border-t-2 border-black/20 rounded-full pointer-events-none"></div>
 
                 {/* Sailing Animation (Wake & Propeller) */}
                 {!isShipDocked(ship) && (
                   <>
                     {/* Bow Wave */}
-                    <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[40px] h-[20px] pointer-events-none overflow-visible z-[-1]">
+                    <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[24px] h-[12px] pointer-events-none overflow-visible z-[-1]">
                       <div className="bow-wave"></div>
                       <div className="bow-wave delay-1"></div>
                     </div>
                     
                     {/* Stern Wake & Propeller */}
                     <div className="propeller-spin z-0"></div>
-                    <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-[40px] h-[60px] pointer-events-none overflow-visible z-[-1]">
+                    <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-[24px] h-[36px] pointer-events-none overflow-visible z-[-1]">
                       <div className="wake-v-shape"></div>
                       <div className="wake-v-shape delay-1"></div>
                       <div className="wake-particle"></div>
