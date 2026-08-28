@@ -1,0 +1,239 @@
+{
+  "_meta": {
+    "name": "HD현대삼호 야드 지도 데이터",
+    "description": "src/components/YardMap.tsx 의 SVG 에 인라인으로 박혀 있던 야드 지형·구역·선석 데이터를 구조화해 추출한 것. 앱 동작에는 아직 연결돼 있지 않은 순수 데이터 스냅샷이다.",
+    "extractedFrom": [
+      "src/components/YardMap.tsx",
+      "src/App.tsx (뷰포트/줌 상수)"
+    ],
+    "sourceCommit": "e6f8baa",
+    "units": "논리 좌표 (logical units). SVG viewBox 0 0 2000 1400 과 1:1.",
+    "axis": "x 는 오른쪽(서→동), y 는 아래쪽(북→남)이 증가 방향. 원점은 좌상단.",
+    "rectConvention": "x, y 는 좌상단 모서리. w, h 는 폭/높이.",
+    "inferenceNote": "'inferred' 로 표시된 필드는 원본 소스에 없는 값이며, 좌표로부터 유도한 해석이다. 나머지는 전부 소스에 명시된 리터럴이다."
+  },
+
+  "coordinateSystem": {
+    "width": 2000,
+    "height": 1400,
+    "viewBox": "0 0 2000 1400",
+    "preserveAspectRatio": "none",
+    "yardBand": {
+      "yStart": 0,
+      "yEnd": 600,
+      "note": "실제 야드(육지+안벽+돌핀)는 위쪽 y 0~600 구간뿐이고, 그 아래 y 600~1400 은 전부 바다다. App.tsx 는 이 값을 자체 상수 YARD_H = 600 으로 따로 들고 있다."
+    },
+    "tracedFrom": {
+      "asset": "public/map.jpg",
+      "referenceCopy": "docs/reference/yard-map-original.png",
+      "photoWidth": 968,
+      "photoHeight": 828,
+      "scaleX": 2.0661,
+      "scaleY": 1.6908,
+      "formula": "logicalX = photoX * 2.0661, logicalY = photoY * 1.6908",
+      "check": "968 * 2.0661 = 2000.0, 828 * 1.6908 = 1400.0"
+    }
+  },
+
+  "palette": {
+    "sea": "#9fc9e4",
+    "land": "#f1ece1",
+    "quay": "#ffffff",
+    "dock": "#bcdcf0",
+    "bldg": "#c3d8ea",
+    "bldgEdge": "#7f9fbe",
+    "road": "#4b433c",
+    "green": "#b9d99a",
+    "crane": "#e79338",
+    "ink": "#22303c",
+    "code": "#c0392b",
+    "_extra": {
+      "bayFill": "#d7e6f3",
+      "bayText": "#3d566e",
+      "dockStroke": "#6f9fc0",
+      "quayStroke": "#9aa2a8",
+      "greenText": "#4a6b35",
+      "roadText": "#5b524a",
+      "seaText": "#ffffff"
+    }
+  },
+
+  "regions": [
+    { "id": "dock2",    "label": "2도크",    "x": 430,  "y": 200, "w": 240,  "h": 420 },
+    { "id": "dock1",    "label": "1도크",    "x": 650,  "y": 200, "w": 220,  "h": 420 },
+    { "id": "quay2",    "label": "2안벽",    "x": 120,  "y": 520, "w": 560,  "h": 220 },
+    { "id": "quay1",    "label": "1안벽",    "x": 880,  "y": 520, "w": 640,  "h": 220 },
+    { "id": "dolphin2", "label": "2돌핀",    "x": 180,  "y": 600, "w": 260,  "h": 320 },
+    { "id": "dolphin1", "label": "1돌핀",    "x": 1000, "y": 600, "w": 260,  "h": 320 },
+    { "id": "floating", "label": "플로팅",   "x": 1580, "y": 620, "w": 300,  "h": 260 },
+    { "id": "all",      "label": "전체",     "x": 0,    "y": 0,   "w": 2000, "h": 780 }
+  ],
+
+  "berthCodes": [
+    { "code": "2Q-2", "x": 120,  "y": 600, "inferredArea": "quay2",    "inferredNote": "2안벽 서쪽 끝" },
+    { "code": "2Q-1", "x": 330,  "y": 600, "inferredArea": "quay2",    "inferredNote": "2안벽 중앙, 2돌핀 진입부 동편" },
+    { "code": "2D-1", "x": 520,  "y": 600, "inferredArea": "dock2",    "inferredNote": "2도크 입구(도크 x 465~620 바로 아래)" },
+    { "code": "DH-2", "x": 830,  "y": 470, "inferredArea": "dock1",    "inferredNote": "1도크(x 682~817) 동편 육상" },
+    { "code": "DH-1", "x": 830,  "y": 545, "inferredArea": "dock1",    "inferredNote": "1도크 동편, 안벽선 높이" },
+    { "code": "1Q-2", "x": 1000, "y": 600, "inferredArea": "quay1",    "inferredNote": "1안벽 서쪽, 1돌핀 진입부 서편" },
+    { "code": "1Q-1", "x": 1280, "y": 600, "inferredArea": "quay1",    "inferredNote": "1안벽 중앙" },
+    { "code": "1D-1", "x": 1620, "y": 640, "inferredArea": "floating", "inferredNote": "플로팅도크(x 1640~1770, y 660~850) 북쪽 끝" },
+    { "code": "1D-2", "x": 1620, "y": 890, "inferredArea": "floating", "inferredNote": "플로팅도크 남쪽 끝" }
+  ],
+  "berthCodeStyle": { "fontSize": 22, "fontWeight": 800, "fill": "#c0392b", "textAnchor": "middle" },
+  "berthCodeNote": "세이프티원 '위치' 칼럼과 대조하는 핵심 라벨. x, y 는 텍스트 앵커(가운데 정렬) 위치이며 선석의 기하학적 중심이 아니다.",
+
+  "features": {
+    "sea": { "type": "rect", "x": 0, "y": 0, "w": 2000, "h": 1400, "fill": "sea" },
+
+    "land": {
+      "type": "path",
+      "d": "M0,0 H2000 V560 H1520 V600 H1180 V560 H900 V600 H560 V560 H0 Z",
+      "fill": "land",
+      "inferredOutline": [
+        [0, 0], [2000, 0], [2000, 560], [1520, 560], [1520, 600],
+        [1180, 600], [1180, 560], [900, 560], [900, 600], [560, 600],
+        [560, 560], [0, 560]
+      ],
+      "inferredNote": "해안선 기본 높이는 y=560. x 560~900 과 x 1180~1520 두 구간만 y=600 까지 내려와 있다."
+    },
+
+    "terrain": [
+      { "id": "galmasan-main", "type": "rect", "x": 360,  "y": 20, "w": 800, "h": 160, "fill": "green", "sourcePath": "M360,20 H1160 V180 H360 Z" },
+      { "id": "galmasan-east", "type": "rect", "x": 1240, "y": 20, "w": 220, "h": 130, "fill": "green", "sourcePath": "M1240,20 H1460 V150 H1240 Z" }
+    ],
+
+    "docks": [
+      { "id": "dock2", "label": "2도크", "x": 465, "y": 235, "w": 155, "h": 350, "fill": "dock", "stroke": "#6f9fc0", "strokeWidth": 3 },
+      { "id": "dock1", "label": "1도크", "x": 682, "y": 235, "w": 135, "h": 350, "fill": "dock", "stroke": "#6f9fc0", "strokeWidth": 3 }
+    ],
+
+    "floatingDock": {
+      "id": "floating", "label": "플로팅도크",
+      "x": 1640, "y": 660, "w": 130, "h": 190,
+      "fill": "dock", "stroke": "#6f9fc0", "strokeWidth": 3
+    },
+
+    "quays": [
+      { "id": "quay2", "label": "2안벽", "x": 0,   "y": 545, "w": 700,  "h": 22, "fill": "quay", "stroke": "#9aa2a8", "strokeWidth": 2 },
+      { "id": "quay1", "label": "1안벽", "x": 880, "y": 545, "w": 1120, "h": 22, "fill": "quay", "stroke": "#9aa2a8", "strokeWidth": 2 }
+    ],
+
+    "dolphins": [
+      {
+        "id": "dolphin2", "label": "2돌핀", "anchorX": 250,
+        "pier":  { "x": 250, "y": 560, "w": 70,  "h": 280, "fill": "quay", "stroke": "#9aa2a8", "strokeWidth": 2 },
+        "head":  { "x": 228, "y": 840, "w": 114, "h": 70,  "fill": "quay", "stroke": "#9aa2a8", "strokeWidth": 2 },
+        "crane": { "x": 262, "y": 866, "w": 46,  "h": 26,  "fill": "crane" }
+      },
+      {
+        "id": "dolphin1", "label": "1돌핀", "anchorX": 1065,
+        "pier":  { "x": 1065, "y": 560, "w": 70,  "h": 280, "fill": "quay", "stroke": "#9aa2a8", "strokeWidth": 2 },
+        "head":  { "x": 1043, "y": 840, "w": 114, "h": 70,  "fill": "quay", "stroke": "#9aa2a8", "strokeWidth": 2 },
+        "crane": { "x": 1077, "y": 866, "w": 46,  "h": 26,  "fill": "crane" }
+      }
+    ],
+    "dolphinTemplate": {
+      "note": "소스에서는 anchorX(=x) 하나로 세 사각형을 생성한다.",
+      "pier":  "x, 560, 70, 280",
+      "head":  "x-22, 840, 114, 70",
+      "crane": "x+12, 866, 46, 26",
+      "label": "(x-70, 700)"
+    },
+
+    "cranes": [
+      { "id": "goliath-w-1", "type": "line", "x1": 430, "y1": 300, "x2": 660, "y2": 300, "strokeWidth": 11, "stroke": "crane", "inferredSpans": "dock2" },
+      { "id": "goliath-w-2", "type": "line", "x1": 430, "y1": 380, "x2": 660, "y2": 380, "strokeWidth": 11, "stroke": "crane", "inferredSpans": "dock2" },
+      { "id": "goliath-w-3", "type": "line", "x1": 430, "y1": 470, "x2": 660, "y2": 470, "strokeWidth": 11, "stroke": "crane", "inferredSpans": "dock2" },
+      { "id": "goliath-e-1", "type": "line", "x1": 655, "y1": 330, "x2": 850, "y2": 330, "strokeWidth": 11, "stroke": "crane", "inferredSpans": "dock1" },
+      { "id": "goliath-e-2", "type": "line", "x1": 655, "y1": 450, "x2": 850, "y2": 450, "strokeWidth": 11, "stroke": "crane", "inferredSpans": "dock1" }
+    ],
+
+    "buildings": [
+      { "x": 70,   "y": 130, "w": 150, "h": 60  },
+      { "x": 240,  "y": 130, "w": 130, "h": 55  },
+      { "x": 80,   "y": 250, "w": 120, "h": 45  },
+      { "x": 230,  "y": 250, "w": 140, "h": 45  },
+      { "x": 80,   "y": 330, "w": 160, "h": 50  },
+      { "x": 270,  "y": 330, "w": 150, "h": 50  },
+      { "x": 90,   "y": 420, "w": 200, "h": 45  },
+      { "x": 880,  "y": 230, "w": 90,  "h": 300 },
+      { "x": 1000, "y": 250, "w": 120, "h": 260 },
+      { "x": 1180, "y": 200, "w": 200, "h": 120 },
+      { "x": 1180, "y": 350, "w": 200, "h": 160 },
+      { "x": 1420, "y": 230, "w": 150, "h": 280 },
+      { "x": 1600, "y": 250, "w": 130, "h": 240 },
+      { "x": 1780, "y": 260, "w": 160, "h": 230 }
+    ],
+    "buildingStyle": { "rx": 3, "fill": "bldg", "stroke": "bldgEdge", "strokeWidth": 1.5 },
+
+    "bays": [
+      { "id": "bay1", "label": "1 Bay", "x": 1180, "y": 210, "w": 190, "h": 40, "labelX": 1275, "labelY": 237 },
+      { "id": "bay2", "label": "2 Bay", "x": 1180, "y": 260, "w": 190, "h": 40, "labelX": 1275, "labelY": 287 },
+      { "id": "bay3", "label": "3 Bay", "x": 1180, "y": 310, "w": 190, "h": 40, "labelX": 1275, "labelY": 337 },
+      { "id": "bay4", "label": "4 Bay", "x": 1180, "y": 360, "w": 190, "h": 40, "labelX": 1275, "labelY": 387 },
+      { "id": "bay5", "label": "5 Bay", "x": 1180, "y": 410, "w": 190, "h": 40, "labelX": 1275, "labelY": 437 },
+      { "id": "bay6", "label": "6 Bay", "x": 1180, "y": 460, "w": 190, "h": 40, "labelX": 1275, "labelY": 487 }
+    ],
+    "bayStyle": { "rx": 2, "fill": "#d7e6f3", "stroke": "bldgEdge", "strokeWidth": 1, "fontSize": 17, "textFill": "#3d566e" },
+    "bayTemplate": { "note": "소스에서는 i=0..5 로 생성한다.", "rect": "1180, 210 + i*50, 190, 40", "label": "(1275, 237 + i*50), '{i+1} Bay'" },
+
+    "roads": [
+      { "id": "main-north",  "type": "hline", "y": 215, "x1": 40,   "x2": 1960, "strokeWidth": 9, "d": "M40,215 H1960" },
+      { "id": "main-south-w","type": "hline", "y": 500, "x1": 40,   "x2": 860,  "strokeWidth": 9, "d": "M40,500 H860" },
+      { "id": "main-south-e","type": "hline", "y": 500, "x1": 900,  "x2": 1960, "strokeWidth": 9, "d": "M900,500 H1960" },
+      { "id": "cross-w",     "type": "vline", "x": 430,  "y1": 215, "y2": 560,  "strokeWidth": 7, "d": "M430,215 V560" },
+      { "id": "cross-c",     "type": "vline", "x": 860,  "y1": 215, "y2": 560,  "strokeWidth": 7, "d": "M860,215 V560" },
+      { "id": "cross-e",     "type": "vline", "x": 1150, "y1": 215, "y2": 560,  "strokeWidth": 7, "d": "M1150,215 V560" }
+    ],
+    "roadStyle": { "stroke": "road", "fill": "none", "strokeLinecap": "round (수평 간선만)" }
+  },
+
+  "labels": [
+    { "text": "갈마산",     "x": 760,  "y": 115,  "fontSize": 40, "fontWeight": 700, "fill": "#4a6b35", "group": "terrain" },
+    { "text": "갈마산",     "x": 1350, "y": 100,  "fontSize": 28, "fontWeight": 700, "fill": "#4a6b35", "group": "terrain" },
+    { "text": "2도크",      "x": 542,  "y": 430,  "fontSize": 34, "fontWeight": 800, "fill": "ink",     "group": "dock" },
+    { "text": "1도크",      "x": 750,  "y": 430,  "fontSize": 34, "fontWeight": 800, "fill": "ink",     "group": "dock" },
+    { "text": "메인도로",   "x": 500,  "y": 205,  "fontSize": 17, "fill": "#5b524a", "group": "road" },
+    { "text": "메인도로",   "x": 1200, "y": 205,  "fontSize": 17, "fill": "#5b524a", "group": "road" },
+    { "text": "2안벽",      "x": 300,  "y": 533,  "fontSize": 30, "fontWeight": 800, "fill": "ink",     "group": "quay" },
+    { "text": "1안벽",      "x": 1250, "y": 533,  "fontSize": 30, "fontWeight": 800, "fill": "ink",     "group": "quay" },
+    { "text": "2돌핀",      "x": 180,  "y": 700,  "fontSize": 30, "fontWeight": 800, "fill": "ink",     "group": "dolphin" },
+    { "text": "1돌핀",      "x": 995,  "y": 700,  "fontSize": 30, "fontWeight": 800, "fill": "ink",     "group": "dolphin" },
+    { "text": "플로팅도크", "x": 1705, "y": 880,  "fontSize": 24, "fontWeight": 700, "fill": "ink",     "group": "dock" },
+    { "text": "1Berth",     "x": 1700, "y": 505,  "fontSize": 26, "fontWeight": 700, "fill": "ink",     "group": "berth" },
+    { "text": "SEA",        "x": 700,  "y": 1000, "fontSize": 40, "fontWeight": 600, "fill": "#ffffff", "opacity": 0.75, "letterSpacing": 8, "group": "sea" },
+    { "text": "SEA",        "x": 1500, "y": 1000, "fontSize": 40, "fontWeight": 600, "fill": "#ffffff", "opacity": 0.75, "letterSpacing": 8, "group": "sea" }
+  ],
+  "labelNote": "모든 텍스트는 textAnchor=middle. x 는 글자의 가운데, y 는 baseline 이다. Bay 라벨 6개와 선석 코드 9개는 features.bays / berthCodes 에 따로 들어 있다.",
+
+  "viewport": {
+    "note": "App.tsx 가 이 지도를 화면에 얹을 때 쓰는 상수들. 지도 자체의 데이터는 아니지만 좌표 해석에 필요하다.",
+    "yardWidth": 2000,
+    "yardHeight": 600,
+    "dockCenterX": 750,
+    "initialZoom": { "formula": "clamp(vw / 1600, 0.3, 0.9)" },
+    "initialScroll": { "top": "150 * zoom", "left": "750 * zoom - vw / 2" },
+    "zoomLimits": {
+      "wheelAndPinch": { "min": 0.2, "max": 3 },
+      "flyTo": { "min": 0.3, "max": 2.2 }
+    },
+    "flyTo": { "pad": 1.18, "fit": 0.8, "durationMs": 620, "easing": "easeInOutCubic" },
+    "wrapperSize": { "width": "2000 * zoom", "height": "1400 * zoom" }
+  },
+
+  "counts": {
+    "regions": 8,
+    "berthCodes": 9,
+    "docks": 2,
+    "floatingDocks": 1,
+    "quays": 2,
+    "dolphins": 2,
+    "cranes": 5,
+    "buildings": 14,
+    "bays": 6,
+    "roads": 6,
+    "terrain": 2,
+    "labels": 14
+  }
+}
