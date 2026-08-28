@@ -1,96 +1,12 @@
 name: Deploy to Cloud Run
 
-# 이 워크플로는 기존 Cloud Run 서비스에 "새 리비전"만 올린다.
-# 서비스 이름 / 리전 / 프로젝트가 그대로이므로 공개 URL은 한 글자도 바뀌지 않는다:
-#   https://hd-ship-location-238928524992.us-west1.run.app
-#
-# 절대 바꾸지 말 것 (바꾸면 URL이 달라진다):
-#   SERVICE, REGION, 그리고 GCP_PROJECT_ID 시크릿
+# TEMPORARY PROBE BRANCH - scope test only. This branch is deleted immediately.
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
-env:
-  SERVICE: hd-ship-location
-  REGION: us-west1
-
 jobs:
-  deploy:
+  noop:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Check that GCP secrets are configured
-        id: precheck
-        run: |
-          if [ -z "${{ secrets.GCP_PROJECT_ID }}" ] \
-          || [ -z "${{ secrets.GCP_WIF_PROVIDER }}" ] \
-          || [ -z "${{ secrets.GCP_SERVICE_ACCOUNT }}" ]; then
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::GCP secrets are not set yet - skipping deploy. See README for the one-time setup."
-          else
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Authenticate to Google Cloud
-        if: steps.precheck.outputs.ready == 'true'
-        uses: google-github-actions/auth@v2
-        with:
-          project_id: ${{ secrets.GCP_PROJECT_ID }}
-          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
-
-      - name: Set up gcloud
-        if: steps.precheck.outputs.ready == 'true'
-        uses: google-github-actions/setup-gcloud@v2
-
-      # 배포 전에 서비스가 실제로 존재하는지 확인한다.
-      # 없는 상태로 배포하면 새 서비스가 만들어지고 URL이 영구히 달라진다.
-      - name: Record service URLs before deploying
-        if: steps.precheck.outputs.ready == 'true'
-        id: before
-        run: |
-          URLS="$(gcloud run services describe "$SERVICE" \
-            --region "$REGION" --project "${{ secrets.GCP_PROJECT_ID }}" \
-            --format='get(status.url,status.urls)' 2>/dev/null | tr -s '[:space:]' ' ' | sed 's/ $//')"
-          if [ -z "$URLS" ]; then
-            echo "::error::Service '$SERVICE' was not found in $REGION. Deploying now would create a NEW service under a different URL. Aborting before any change is made."
-            exit 1
-          fi
-          echo "urls=$URLS" >> "$GITHUB_OUTPUT"
-          echo "Before deploy: $URLS"
-
-      - name: Deploy new revision to the existing service
-        if: steps.precheck.outputs.ready == 'true'
-        run: |
-          gcloud run deploy "$SERVICE" \
-            --source . \
-            --region "$REGION" \
-            --project "${{ secrets.GCP_PROJECT_ID }}" \
-            --allow-unauthenticated \
-            --quiet
-
-      # 배포 후 주소가 그대로인지 검증한다. 달라졌다면 즉시 빨간불로 알린다.
-      - name: Verify the service URLs did not change
-        if: steps.precheck.outputs.ready == 'true'
-        run: |
-          AFTER="$(gcloud run services describe "$SERVICE" \
-            --region "$REGION" --project "${{ secrets.GCP_PROJECT_ID }}" \
-            --format='get(status.url,status.urls)' | tr -s '[:space:]' ' ' | sed 's/ $//')"
-          BEFORE="${{ steps.before.outputs.urls }}"
-          echo "Before: $BEFORE"
-          echo "After : $AFTER"
-          if [ "$AFTER" != "$BEFORE" ]; then
-            echo "::error::The service URL changed during this deploy. Before: $BEFORE / After: $AFTER"
-            exit 1
-          fi
-          echo "::notice::URL unchanged — $AFTER"
-
-# scope probe 1787915657
+      - run: echo "probe"
