@@ -54,7 +54,7 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
   console.error('Firestore Error: ', JSON.stringify(errInfo));
   throw new Error(JSON.stringify(errInfo));
 }
-import { RotateCcw, X, MessageSquare, Plus, Waves, ChevronUp, ChevronDown, Droplets, ArrowUpCircle, ArrowDownCircle, Lock, Unlock } from 'lucide-react';
+import { RotateCcw, X, MessageSquare, Plus, Waves, Info, ChevronUp, ChevronDown, Droplets, ArrowUpCircle, ArrowDownCircle, Lock, Unlock } from 'lucide-react';
 
 interface ShipData {
   x: number;
@@ -104,6 +104,7 @@ export default function App() {
   // 처음부터 접어둔다. 넉넉한 화면에서는 펼친 채로 시작한다.
   // 패널은 한 번에 하나만 연다. 기본은 닫힘 — 지도가 주인공이다.
   const [openPanel, setOpenPanel] = useState<null | 'info' | 'add'>(null);
+  const [bannerOpen, setBannerOpen] = useState(false);
   const [infoTab, setInfoTab] = useState<'tide' | 'wind'>('tide');
   const [windData, setWindData] = useState<{speed: number, direction: string, degrees: number, time: string, hourly: { speeds: number[] }} | null>(null);
   const [tideData, setTideData] = useState<TideInfo | null>(null);
@@ -117,8 +118,41 @@ export default function App() {
   // 붙는 순간 야드 높이에 맞춰 배율을 잡고 가로 중앙으로 보낸다.
   // useEffect 가 아니라 콜백 ref 인 이유: 이름 입력 화면이 떠 있는 동안에는
   // 이 div 자체가 없어서 마운트 시점의 ref 는 항상 null 이다.
+  const nativeCleanup = useRef<(() => void) | null>(null);
+
   const attachViewport = useCallback((node: HTMLDivElement | null) => {
+    nativeCleanup.current?.();
+    nativeCleanup.current = null;
     viewportRef.current = node;
+
+    if (node) {
+      const onWheel = (e: WheelEvent) => {
+        e.preventDefault();                       // 기본 스크롤이 얹히지 않게
+        const rect = node.getBoundingClientRect();
+        const z1 = Math.min(3, Math.max(0.2, zoomRef.current + e.deltaY * -0.001));
+        applyZoomAtRef.current?.(z1, e.clientX - rect.left, e.clientY - rect.top);
+      };
+      const onTouchMove = (e: TouchEvent) => {
+        if (e.touches.length !== 2 || !pinchRef.current) return;
+        e.preventDefault();                       // 핀치 중 기본 스크롤/줌 차단
+        const dist = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY,
+        );
+        const z1 = Math.min(3, Math.max(0.2, pinchRef.current.zoom * (dist / pinchRef.current.dist)));
+        const rect = node.getBoundingClientRect();
+        const mx = (e.touches[0].clientX + e.touches[1].clientX) / 2 - rect.left;
+        const my = (e.touches[0].clientY + e.touches[1].clientY) / 2 - rect.top;
+        applyZoomAtRef.current?.(z1, mx, my);
+      };
+      node.addEventListener('wheel', onWheel, { passive: false });
+      node.addEventListener('touchmove', onTouchMove, { passive: false });
+      nativeCleanup.current = () => {
+        node.removeEventListener('wheel', onWheel);
+        node.removeEventListener('touchmove', onTouchMove);
+      };
+    }
+
     if (!node || didInitView.current) return;
 
     const YARD_W = 2000, YARD_H = 600;
@@ -159,6 +193,32 @@ export default function App() {
   const zoomRef = useRef(zoom);
   useEffect(() => { zoomRef.current = zoom; }, [zoom]);
   const flyingRef = useRef(false);
+  const applyZoomAtRef = useRef<((z: number, ax: number, ay: number) => void) | null>(null);
+
+  /** 화면상의 한 점(ax, ay)을 고정한 채 배율만 바꾼다.
+   *
+   *  지도는 origin-top-left 로 확대되므로 스크롤을 함께 보정하지 않으면
+   *  항상 지도 왼쪽 위를 기준으로 커진다. 그래서 어딘가로 이동한 뒤 핀치하면
+   *  손가락 아래가 아니라 엉뚱한 곳이 확대돼 화면이 튄다.
+   *  DOM 을 먼저 넓힌 뒤 스크롤해야 목표가 잘리지 않는다. */
+  const applyZoomAt = useCallback((z1: number, ax: number, ay: number) => {
+    const node = viewportRef.current;
+    const inner = containerRef.current;
+    const wrap = inner?.parentElement as HTMLElement | null;
+    if (!node || !inner || !wrap) return;
+    const z0 = zoomRef.current;
+    if (!z0) return;
+    const lx = (node.scrollLeft + ax) / z0;   // 고정하려는 지점의 논리 좌표
+    const ly = (node.scrollTop + ay) / z0;
+    wrap.style.width = `${2000 * z1}px`;
+    wrap.style.height = `${1400 * z1}px`;
+    inner.style.transform = `scale(${z1})`;
+    node.scrollLeft = Math.max(0, lx * z1 - ax);
+    node.scrollTop  = Math.max(0, ly * z1 - ay);
+    zoomRef.current = z1;
+    setZoom(z1);
+  }, []);
+  applyZoomAtRef.current = applyZoomAt;
 
   /** 지역 버튼 → 그 구역이 화면에 꽉 차도록 배율과 위치를 동시에 움직인다.
    *
@@ -174,7 +234,9 @@ export default function App() {
 
     const vw = node.clientWidth, vh = node.clientHeight;
     const PAD = 1.18;                                  // 구역 가장자리 여유
-    const z1 = Math.max(0.3, Math.min(2.2, Math.min(vw / (r.w * PAD), vh / (r.h * PAD))));
+    // 꽉 채우면 답답해서 한 단계 물러난 배율로 착지한다.
+    const FIT = 0.8;
+    const z1 = Math.max(0.3, Math.min(2.2, Math.min(vw / (r.w * PAD), vh / (r.h * PAD)) * FIT));
     const z0 = zoomRef.current;
     const sl0 = node.scrollLeft, st0 = node.scrollTop;
     const cx = r.x + r.w / 2, cy = r.y + r.h / 2;
@@ -733,21 +795,10 @@ export default function App() {
         e.touches[0].clientX - e.touches[1].clientX,
         e.touches[0].clientY - e.touches[1].clientY
       );
-      pinchRef.current = { dist, zoom };
+      pinchRef.current = { dist, zoom: zoomRef.current };
     }
   };
 
-  const handleTouchMove = (e: React.TouchEvent) => {
-    if (e.touches.length === 2 && pinchRef.current) {
-      const dist = Math.hypot(
-        e.touches[0].clientX - e.touches[1].clientX,
-        e.touches[0].clientY - e.touches[1].clientY
-      );
-      const scale = dist / pinchRef.current.dist;
-      const newZoom = Math.min(3, Math.max(0.2, pinchRef.current.zoom * scale));
-      setZoom(newZoom);
-    }
-  };
 
   const handleTouchEnd = (e: React.TouchEvent) => {
     if (e.touches.length < 2) {
@@ -756,11 +807,6 @@ export default function App() {
     }
   };
 
-  const handleWheel = (e: React.WheelEvent) => {
-    const scaleChange = e.deltaY * -0.001;
-    const newZoom = Math.min(3, Math.max(0.2, zoom + scaleChange));
-    setZoom(newZoom);
-  };
 
   const handleBackgroundPointerDown = (e: ReactPointerEvent) => {
     if (!(e.target as HTMLElement).closest('.ship') && !(e.target as HTMLElement).closest('.zone')) {
@@ -806,33 +852,43 @@ export default function App() {
 
   return (
     <div className="w-screen h-[100dvh] bg-[#2c3e50] font-sans overflow-hidden flex flex-col">
-      {/* Top Header Container */}
-      <div className="fixed top-2 left-2 right-2 z-50 flex justify-between items-start pointer-events-none gap-2">
-        {/* Title Panel */}
-        <div className="bg-white/90 p-2 sm:p-3 rounded-lg shadow-md pointer-events-auto max-w-[65%] sm:max-w-none">
-          <h3 
-            className="m-0 text-sm sm:text-lg font-bold text-gray-800 flex items-center gap-1 sm:gap-2 cursor-pointer select-none flex-wrap"
-            onClick={handleTitleTap}
-          >
-            <span className="truncate">HD현대삼호 SHIP LOCATION</span>
-            {isAdminUrl && (
-              <span className={`text-[10px] sm:text-xs px-1.5 py-0.5 sm:px-2 sm:py-1 rounded text-white whitespace-nowrap ${appMode === 'admin' ? 'bg-blue-600' : 'bg-emerald-600'}`}>
-                {appMode === 'admin' ? '관리자' : '뷰어'}
-              </span>
-            )}
-          </h3>
-          {appMode === 'admin' && <p className="m-0 mt-1 text-[10px] sm:text-sm text-gray-600 leading-tight">배를 탭(클릭)하면 메뉴가 나옵니다.</p>}
-        </div>
+      {/* 좌상단: 배너 대신 동그란 버튼. 누르면 배너가 펼쳐진다.
+          모드 전환(뷰어/관리자)도 이 안에 넣었다 — 따로 떠 있던 배지를 없애면서
+          관리자 모드에서 빠져나올 길이 사라지지 않도록. */}
+      <div className="fixed top-3 left-3 z-50 flex flex-col items-start gap-2">
+        <button
+          onClick={() => setBannerOpen(o => !o)}
+          aria-label="정보"
+          className={`w-12 h-12 shadow-xl rounded-full flex items-center justify-center border transition-all active:scale-95 ${bannerOpen ? 'bg-blue-600 text-white border-blue-700' : 'bg-white/95 backdrop-blur text-blue-600 border-gray-200'}`}
+        >
+          <Info size={24} />
+        </button>
 
-        {/* Admin Mode Toggle */}
-        {isAdminUrl && (
-          <div className="bg-white/90 p-1.5 sm:p-2 rounded-lg shadow-md pointer-events-auto shrink-0">
-            <button 
-              onClick={() => setAppMode(prev => prev === 'admin' ? 'viewer' : 'admin')} 
-              className="px-2 py-1.5 sm:px-3 sm:py-2 bg-gray-800 hover:bg-gray-700 text-white rounded font-bold text-xs sm:text-sm whitespace-nowrap"
+        {bannerOpen && (
+          <div className="bg-white/95 backdrop-blur px-4 py-3 rounded-2xl shadow-xl max-w-[80vw]">
+            {/* 제목 5번 탭 = 관리자 잠금 해제. 배너 안으로 들어왔다. */}
+            <h3
+              className="m-0 text-base font-bold text-gray-800 flex items-center gap-2 cursor-pointer select-none flex-wrap"
+              onClick={handleTitleTap}
             >
-              {appMode === 'admin' ? '👀 뷰어' : '🛠️ 관리자'}
-            </button>
+              <span>HD현대삼호 SHIP LOCATION</span>
+              {isAdminUrl && (
+                <span className={`text-xs px-2 py-0.5 rounded text-white whitespace-nowrap ${appMode === 'admin' ? 'bg-blue-600' : 'bg-emerald-600'}`}>
+                  {appMode === 'admin' ? '관리자' : '뷰어'}
+                </span>
+              )}
+            </h3>
+            {appMode === 'admin' && (
+              <p className="m-0 mt-1 text-xs text-gray-600 leading-tight">배를 탭(클릭)하면 메뉴가 나옵니다.</p>
+            )}
+            {isAdminUrl && (
+              <button
+                onClick={() => setAppMode(prev => prev === 'admin' ? 'viewer' : 'admin')}
+                className="mt-2 w-full px-3 py-2 bg-gray-800 hover:bg-gray-700 text-white rounded-lg font-bold text-sm"
+              >
+                {appMode === 'admin' ? '👀 뷰어로 보기' : '🛠️ 관리자로 전환'}
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -1042,17 +1098,17 @@ export default function App() {
       </div>
 
       {/* 지역 바로가기. 누르면 그 구역으로 부드럽게 확대 이동한다.
-          하단 이력 바 바로 위, 엄지가 닿는 자리에 둔다. */}
+          2단으로 쌓아 가로 폭을 줄이고, 최근 업데이트 바에 바짝 붙인다. */}
       <div
         style={{ bottom: 'calc(3rem + env(safe-area-inset-bottom))' }}
-        className="fixed left-0 right-0 z-40 px-2 pb-2 overflow-x-auto"
+        className="fixed left-0 right-0 z-40 px-2 pb-1 overflow-x-auto"
       >
-        <div className="flex gap-2 w-max mx-auto">
+        <div className="grid grid-rows-2 grid-flow-col gap-1.5 w-max mx-auto">
           {YARD_REGIONS.map(r => (
             <button
               key={r.id}
               onClick={() => flyTo(r)}
-              className="px-4 h-10 shrink-0 rounded-full bg-white/95 backdrop-blur text-gray-800 text-sm font-bold shadow-lg border border-gray-200 active:scale-95 active:bg-blue-50 transition-all"
+              className="px-4 h-9 shrink-0 rounded-full bg-white/95 backdrop-blur text-gray-800 text-sm font-bold shadow-lg border border-gray-200 active:scale-95 active:bg-blue-50 transition-all"
             >
               {r.label}
             </button>
@@ -1074,9 +1130,7 @@ export default function App() {
         className="flex-1 overflow-auto relative touch-pan-x touch-pan-y bg-[#9fc9e4]"
         onPointerDown={handleBackgroundPointerDown}
         onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
-        onWheel={handleWheel}
       >
         <div 
           className={isPinching ? '' : 'transition-all duration-200 ease-out'}
