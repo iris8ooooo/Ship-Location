@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0284c7" />
+      <stop offset="100%" stop-color="#1e3a8a" />
+    </linearGradient>
+    <linearGradient id="hull" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#f8fafc" />
+      <stop offset="100%" stop-color="#94a3b8" />
+    </linearGradient>
+    <linearGradient id="water" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8" opacity="0.6"/>
+      <stop offset="100%" stop-color="#0284c7" opacity="0.9"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)" />
+  
+  <!-- Water reflection/base -->
+  <ellipse cx="256" cy="380" rx="180" ry="40" fill="#0f172a" opacity="0.3" />
+  
+  <!-- Ship Hull -->
+  <path d="M 60 240 L 452 240 L 390 370 L 120 370 Z" fill="url(#hull)" />
+  <path d="M 60 240 L 452 240 L 430 260 L 80 260 Z" fill="#ffffff" /> <!-- highlight -->
+  
+  <!-- Bridge -->
+  <path d="M 100 150 L 180 150 L 180 240 L 100 240 Z" fill="#e2e8f0" />
+  <path d="M 110 160 L 170 160 L 170 190 L 110 190 Z" fill="#0ea5e9" /> <!-- window -->
+  <path d="M 140 110 L 145 110 L 145 150 L 140 150 Z" fill="#64748b" /> <!-- antenna -->
+  <circle cx="142.5" cy="110" r="6" fill="#ef4444" />
+  
+  <!-- Containers -->
+  <!-- Row 1 -->
+  <rect x="200" y="190" width="50" height="50" rx="4" fill="#f59e0b" />
+  <rect x="260" y="190" width="50" height="50" rx="4" fill="#10b981" />
+  <rect x="320" y="190" width="50" height="50" rx="4" fill="#ef4444" />
+  <rect x="380" y="190" width="50" height="50" rx="4" fill="#8b5cf6" />
+  
+  <!-- Row 2 -->
+  <rect x="200" y="130" width="50" height="50" rx="4" fill="#3b82f6" />
+  <rect x="260" y="130" width="50" height="50" rx="4" fill="#ec4899" />
+  <rect x="320" y="130" width="50" height="50" rx="4" fill="#f97316" />
+  
+  <!-- Water waves -->
+  <path d="M 0 350 Q 128 320 256 360 T 512 340 L 512 512 L 0 512 Z" fill="url(#water)" />
+  <path d="M 0 390 Q 128 360 256 400 T 512 380 L 512 512 L 0 512 Z" fill="#0369a1" opacity="0.5" />
+</svg>

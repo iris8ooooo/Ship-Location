@@ -1,0 +1,83 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: ships
+    // Document ID: {shipId}
+    // Fields:
+    //   - x: number
+    //   - y: number
+    //   - r: number
+    //   - color: string
+    //   - memo: string (optional)
+    //
+    // Collection: zones
+    // Document ID: {zoneId}
+    // Fields:
+    //   - x: number
+    //   - y: number
+    //   - r: number
+    //
+    // Collection: history
+    // Document ID: {logId}
+    // Fields:
+    //   - action: string
+    //   - shipId: string
+    //   - author: string
+    //   - timestamp: number
+    //
+    // ===============================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isValidShip(data) {
+      return data.keys().hasAll(['x', 'y', 'r', 'color']) &&
+             data.x is number &&
+             data.y is number &&
+             data.r is number &&
+             data.color is string &&
+             (!('memo' in data) || data.memo is string);
+    }
+
+    function isValidZone(data) {
+      return data.keys().hasAll(['x', 'y', 'r']) &&
+             data.x is number &&
+             data.y is number &&
+             data.r is number &&
+             (!('isLocked' in data) || data.isLocked is boolean);
+    }
+
+    function isValidHistoryLog(data) {
+      return data.keys().hasAll(['action', 'shipId', 'author', 'timestamp']) &&
+             data.action is string &&
+             data.shipId is string &&
+             data.author is string &&
+             data.timestamp is number;
+    }
+
+    match /ships/{shipId} {
+      allow read: if true;
+      allow create: if isValidShip(request.resource.data);
+      allow update: if isValidShip(request.resource.data);
+      allow delete: if true;
+    }
+
+    match /zones/{zoneId} {
+      allow read: if true;
+      allow create: if isValidZone(request.resource.data);
+      allow update: if isValidZone(request.resource.data);
+      allow delete: if true;
+    }
+
+    match /history/{logId} {
+      allow read: if true;
+      allow create: if isValidHistoryLog(request.resource.data);
+      allow update, delete: if false;
+    }
+  }
+}

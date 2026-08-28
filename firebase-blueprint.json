@@ -1,0 +1,54 @@
+{
+  "entities": {
+    "ShipData": {
+      "title": "ShipData",
+      "description": "Data for a ship on the map",
+      "type": "object",
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "r": { "type": "number" },
+        "color": { "type": "string" },
+        "memo": { "type": "string" }
+      },
+      "required": ["x", "y", "r", "color"]
+    },
+    "ZoneData": {
+      "title": "ZoneData",
+      "description": "Data for a docking zone on the map",
+      "type": "object",
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "r": { "type": "number" }
+      },
+      "required": ["x", "y", "r"]
+    },
+    "HistoryLog": {
+      "title": "HistoryLog",
+      "description": "Log of actions performed by admins",
+      "type": "object",
+      "properties": {
+        "action": { "type": "string" },
+        "shipId": { "type": "string" },
+        "author": { "type": "string" },
+        "timestamp": { "type": "number" }
+      },
+      "required": ["action", "shipId", "author", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/ships/{shipId}": {
+      "schema": { "$ref": "#/entities/ShipData" },
+      "description": "Collection of ships"
+    },
+    "/zones/{zoneId}": {
+      "schema": { "$ref": "#/entities/ZoneData" },
+      "description": "Collection of docking zones"
+    },
+    "/history/{logId}": {
+      "schema": { "$ref": "#/entities/HistoryLog" },
+      "description": "Collection of action history logs"
+    }
+  }
+}

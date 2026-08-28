@@ -1,0 +1,5 @@
+{
+  "name": "HD현대삼호 SHIP LOCATION",
+  "description": "선박 건조장(Yard)의 지형도 위에 배 모양의 아이콘을 배치하고 실시간으로 위치를 동기화하는 웹 애플리케이션",
+  "requestFramePermissions": []
+}

@@ -1,0 +1,129 @@
+@import url('https://fonts.googleapis.com/css2?family=Gowun+Dodum&display=swap');
+@import "tailwindcss";
+
+@layer utilities {
+  .font-memo {
+    font-family: 'Gowun Dodum', sans-serif;
+  }
+}
+
+@keyframes ship-bob {
+  0%, 100% { translate: 0px 0px; }
+  50% { translate: 0px -4px; }
+}
+
+.animate-ship-bob {
+  animation: ship-bob 2s ease-in-out infinite;
+}
+
+@keyframes bow-wave {
+  0% {
+    transform: translateX(-50%) scale(0.5);
+    opacity: 0.8;
+  }
+  100% {
+    transform: translateX(-50%) scale(1.5) translateY(-10px);
+    opacity: 0;
+  }
+}
+
+.bow-wave {
+  position: absolute;
+  top: -8px;
+  left: 50%;
+  width: 30px;
+  height: 20px;
+  border-top: 3px solid rgba(255, 255, 255, 0.8);
+  border-left: 3px solid transparent;
+  border-right: 3px solid transparent;
+  border-radius: 50% 50% 0 0;
+  animation: bow-wave 1.5s infinite ease-out;
+  pointer-events: none;
+}
+
+.bow-wave.delay-1 {
+  animation-delay: 0.75s;
+}
+
+@keyframes wake-foam {
+  0% {
+    transform: translateX(-50%) scale(0.2);
+    opacity: 0.8;
+  }
+  100% {
+    transform: translateX(-50%) scale(2.5) translateY(20px);
+    opacity: 0;
+  }
+}
+
+@keyframes wake-v {
+  0% {
+    transform: translateX(-50%) scale(0.2) perspective(100px) rotateX(45deg);
+    opacity: 0.8;
+  }
+  100% {
+    transform: translateX(-50%) scale(2.5) perspective(100px) rotateX(45deg) translateY(20px);
+    opacity: 0;
+  }
+}
+
+.wake-v-shape {
+  position: absolute;
+  left: 50%;
+  bottom: -5px;
+  width: 30px;
+  height: 40px;
+  border-left: 3px solid rgba(255, 255, 255, 0.6);
+  border-right: 3px solid rgba(255, 255, 255, 0.6);
+  border-bottom: none;
+  border-top: none;
+  transform-origin: top center;
+  animation: wake-v 1.5s infinite ease-out;
+  pointer-events: none;
+}
+
+.wake-v-shape.delay-1 {
+  animation-delay: 0.75s;
+}
+
+.wake-particle {
+  position: absolute;
+  left: 50%;
+  bottom: -5px;
+  width: 20px;
+  height: 20px;
+  background-color: rgba(255, 255, 255, 0.7);
+  border-radius: 50%;
+  filter: blur(2px);
+  animation: wake-foam 1.5s infinite ease-out;
+  pointer-events: none;
+}
+
+.wake-particle.delay-1 {
+  animation-delay: 0.5s;
+}
+
+.wake-particle.delay-2 {
+  animation-delay: 1.0s;
+}
+
+@keyframes propeller {
+  0% { transform: translateX(-50%) rotate(0deg); }
+  100% { transform: translateX(-50%) rotate(360deg); }
+}
+
+.propeller-spin {
+  position: absolute;
+  bottom: -6px;
+  left: 50%;
+  width: 16px;
+  height: 16px;
+  background: conic-gradient(
+    rgba(255,255,255,0.8) 0deg 30deg, transparent 30deg 120deg,
+    rgba(255,255,255,0.8) 120deg 150deg, transparent 150deg 240deg,
+    rgba(255,255,255,0.8) 240deg 270deg, transparent 270deg 360deg
+  );
+  border-radius: 50%;
+  animation: propeller 0.15s infinite linear;
+  pointer-events: none;
+}
