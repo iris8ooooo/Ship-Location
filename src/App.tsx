@@ -1161,7 +1161,7 @@ export default function App() {
             className={`relative origin-top-left ${isPinching ? '' : 'transition-transform duration-300 ease-out'}`}
             onClick={handleMapClick}
           >
-            <YardMap />
+            <YardMap zoom={zoom} />
           {Object.keys(zones).map((id) => {
             const zone = zones[id];
             const isSelected = selectedZoneId === id;
@@ -1169,7 +1169,7 @@ export default function App() {
               <div
                 id={`zone-${id}`}
                 key={id}
-                className={`zone absolute w-[45px] h-[160px] border-2 border-dashed rounded-[50%_50%_8px_8px] flex flex-col items-center justify-center select-none touch-none transition-transform duration-300
+                className={`zone absolute w-[26px] h-[92px] border-2 border-dashed rounded-[50%_50%_8px_8px] flex flex-col items-center justify-center select-none touch-none transition-transform duration-300
                   ${appMode === 'admin' ? (zone.isLocked ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing active:z-[999]') : 'pointer-events-none'}
                   ${isSelected && appMode === 'admin' ? 'border-red-600 bg-red-500/40 z-20 shadow-[0_0_15px_rgba(239,68,68,0.5)]' : 'border-orange-500 bg-orange-500/30 z-0'}
                   ${zone.isLocked ? 'border-gray-500 bg-gray-500/30' : ''}
@@ -1222,7 +1222,7 @@ export default function App() {
               <div
                 id={`ship-${id}`}
                 key={id}
-                className={`absolute w-[45px] h-[160px] select-none touch-none transition-transform duration-300
+                className={`absolute w-[26px] h-[92px] select-none touch-none transition-transform duration-300
                   ${appMode === 'admin' ? 'cursor-grab active:cursor-grabbing active:z-[999]' : 'cursor-default'}
                   ${isSelected && appMode === 'admin' ? 'z-[100]' : 'z-10'}
                 `}
