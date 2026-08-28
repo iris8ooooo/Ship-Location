@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, PointerEvent as ReactPointerEvent } from 'react';
+import React, { useCallback, useEffect, useRef, useState, PointerEvent as ReactPointerEvent } from 'react';
 import { collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, addDoc, query, orderBy, limit } from 'firebase/firestore';
 import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User } from 'firebase/auth';
 import { db, auth } from './firebase';
@@ -104,6 +104,44 @@ export default function App() {
   const [tideData, setTideData] = useState<TideInfo | null>(null);
   
   const containerRef = useRef<HTMLDivElement>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const didInitView = useRef(false);
+
+  // 지도는 2000x1400 이지만 야드는 위쪽 600 뿐이고 아래는 전부 바다다.
+  // 스크롤 0,0 에서 시작하면 왼쪽 귀퉁이와 바다만 보이므로, 지도가 화면에
+  // 붙는 순간 야드 높이에 맞춰 배율을 잡고 가로 중앙으로 보낸다.
+  // useEffect 가 아니라 콜백 ref 인 이유: 이름 입력 화면이 떠 있는 동안에는
+  // 이 div 자체가 없어서 마운트 시점의 ref 는 항상 null 이다.
+  const attachViewport = useCallback((node: HTMLDivElement | null) => {
+    viewportRef.current = node;
+    if (!node || didInitView.current) return;
+
+    const YARD_W = 2000, YARD_H = 600;
+    const DOCK_X = 750;   // 두 도크가 있는 야드의 작업 중심
+    let tries = 0;
+
+    // ref 가 붙는 순간에는 flex 레이아웃이 아직 안 잡혀 높이가 0 일 수 있다.
+    // 크기가 나올 때까지 몇 프레임 기다린다.
+    const apply = () => {
+      const vw = node.clientWidth, vh = node.clientHeight;
+      if (!vw || !vh) {
+        if (tries++ < 30) requestAnimationFrame(apply);
+        return;
+      }
+      didInitView.current = true;
+      // 가로로 논리 좌표 약 1400 폭이 들어오도록 잡는다. 세로가 아니라 가로를
+      // 기준으로 삼는 이유는, 야드가 가로로 길어서 세로에 맞추면 폭이 너무
+      // 좁게 잘리기 때문이다. 위아래 여백은 패널이 어차피 덮는다.
+      const z = Math.max(0.4, Math.min(0.95, vw / 1400));
+      setZoom(z);
+      requestAnimationFrame(() => {
+        // 도크와 안벽이 있는 작업 구간(논리 y 150 부터)을 화면 위에 둔다.
+        node.scrollTop = Math.max(0, 150 * z);
+        node.scrollLeft = Math.max(0, DOCK_X * z - vw / 2);
+      });
+    };
+    requestAnimationFrame(apply);
+  }, []);
   const pinchRef = useRef<{ dist: number, zoom: number } | null>(null);
   const tapTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -874,11 +912,11 @@ export default function App() {
 
       {/* Add Ship Panel */}
       {appMode === 'admin' && (
-        <div className="fixed bottom-16 left-2 right-2 lg:bottom-auto lg:top-16 lg:left-auto lg:right-2 bg-white/95 p-3 rounded-lg z-40 shadow-md flex gap-2 items-center justify-center lg:justify-start flex-wrap">
+        <div className="fixed bottom-16 left-2 right-2 lg:bottom-auto lg:top-16 lg:left-auto lg:right-2 bg-white/95 p-3 rounded-lg z-40 shadow-md grid grid-cols-2 gap-2 items-center lg:flex lg:flex-nowrap lg:justify-start">
           <select 
             value={newShipColor} 
             onChange={e => setNewShipColor(e.target.value)}
-            className="p-2 text-sm border border-gray-300 rounded bg-white text-gray-800 flex-1 lg:flex-none"
+            className="p-2 text-sm border border-gray-300 rounded bg-white text-gray-800 w-full min-w-0 lg:w-auto"
           >
             <option value="yellow">노란색</option>
             <option value="green">초록색</option>
@@ -889,17 +927,17 @@ export default function App() {
             onChange={e => setNewShipName(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && handleAddShip()}
             placeholder="호선 번호" 
-            className="p-2 text-base w-24 flex-1 lg:flex-none border border-gray-300 rounded text-gray-800"
+            className="p-2 text-base w-full min-w-0 lg:w-28 border border-gray-300 rounded text-gray-800"
           />
           <button 
             onClick={handleAddShip}
-            className="px-4 py-2 text-base bg-blue-500 hover:bg-blue-600 active:bg-blue-700 text-white font-bold rounded transition-colors whitespace-nowrap"
+            className="px-4 py-2 text-base bg-blue-500 hover:bg-blue-600 active:bg-blue-700 text-white font-bold rounded transition-colors whitespace-nowrap shrink-0"
           >
             배 추가
           </button>
           <button 
             onClick={() => setIsAddingZone(!isAddingZone)}
-            className={`px-4 py-2 text-base font-bold rounded transition-colors whitespace-nowrap ${isAddingZone ? 'bg-red-500 hover:bg-red-600 text-white' : 'bg-purple-500 hover:bg-purple-600 text-white'}`}
+            className={`px-4 py-2 text-base font-bold rounded transition-colors whitespace-nowrap shrink-0 ${isAddingZone ? 'bg-red-500 hover:bg-red-600 text-white' : 'bg-purple-500 hover:bg-purple-600 text-white'}`}
           >
             {isAddingZone ? '영역 추가 취소' : '마그네틱 영역 추가'}
           </button>
@@ -907,7 +945,7 @@ export default function App() {
       )}
 
       {/* Zoom Controls */}
-      <div className="fixed right-4 bottom-32 z-40 flex flex-col gap-2">
+      <div className="fixed right-3 top-1/2 -translate-y-1/2 z-50 flex flex-col gap-2">
         <button
           onClick={() => setZoom(z => Math.min(3, z + 0.2))}
           className="w-10 h-10 bg-white shadow-lg rounded-full flex items-center justify-center text-gray-700 hover:bg-gray-50 hover:text-blue-600 border border-gray-200 transition-colors"
@@ -932,6 +970,7 @@ export default function App() {
 
       {/* Viewport */}
       <div 
+        ref={attachViewport}
         className="flex-1 overflow-auto relative touch-pan-x touch-pan-y"
         onPointerDown={handleBackgroundPointerDown}
         onTouchStart={handleTouchStart}
@@ -1068,19 +1107,13 @@ export default function App() {
                   </>
                 )}
 
+                {/* 호선번호. 세로로 선 배는 글자를 한 자씩 쌓지 않고 라벨 자체를
+                    90도 눕혀 선체 방향으로 한 줄에 읽히게 한다 (세이프티원과 동일한 방식). */}
                 <div 
                   className={`z-10 text-[26px] font-black drop-shadow-md ${isGreen ? 'text-white' : 'text-gray-900'}`}
-                  style={{ transform: `rotate(${-ship.r}deg)` }}
+                  style={{ transform: `rotate(${ship.r % 180 === 0 ? -ship.r - 90 : -ship.r}deg)` }}
                 >
-                  {ship.r % 180 === 0 ? (
-                    <div className="flex flex-col items-center leading-none" style={{ gap: '2.6px' }}>
-                      {String(id).split('').map((char, i) => (
-                        <span key={i}>{char}</span>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="tracking-widest whitespace-nowrap">{id}</div>
-                  )}
+                  <div className="tracking-wider whitespace-nowrap">{id}</div>
                 </div>
 
                 {/* Memo Display */}
