@@ -1,0 +1,222 @@
+<?xml version="1.0"?><svg vector-effect="non-scaling-stroke" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1380 840" style="background:#dbe9f4" font-family="Inter, system-ui, sans-serif" aria-label="HD현대삼호 야드 배치도">
+        <rect x="0" y="0" width="1380" height="840" fill="#f4f1ea"></rect>
+        <path d="M-60,538 L236,544 L716,550 L1056,554 L1344,560 L1386,494 L1436,448 L1436,900 L-60,900 Z" fill="#dbe9f4"></path>
+        <path d="M-13,66 L227,48 L239,28 L299,20 L387,26 L507,34 L627,40 L747,42 L845,0 L865,-92 L917,-132 L987,-142 L1029,-90 L1063,-30 L1109,2 L1139,82 L1229,132 L1259,202 L1289,272 L1319,302 L1367,320 L1317,370 L1275,436 L987,430 L647,426 L167,420 L-13,416 Z" fill="#e9e1d4" stroke="#c9c0af" stroke-width="1.2"></path>
+        <g fill="#8f959b" stroke="#6f757a" stroke-width="1.2">
+          <path d="M1127,267 L1175,253 L1205,273 L1218,319 L1183,344 L1141,329 L1129,297 Z"></path>
+          <path d="M1146,214 L1188,196 L1214,224 L1180,252 L1150,244 Z"></path>
+        </g>
+        <g fill="#ded4c4" stroke="#c8bda9" stroke-width="1">
+          <rect x="0" y="222" width="80" height="34"></rect>
+          <rect x="0" y="291" width="86" height="60"></rect>
+          <rect x="0" y="350" width="86" height="56"></rect>
+          <rect x="1" y="406" width="86" height="52"></rect>
+          <rect x="0" y="458" width="86" height="48"></rect>
+          <rect x="1" y="508" width="88" height="42"></rect>
+          <rect x="112" y="404" width="80" height="52"></rect>
+          <rect x="196" y="400" width="90" height="56"></rect>
+          <rect x="117" y="465" width="174" height="46"></rect>
+          <rect x="196" y="358" width="90" height="38"></rect>
+          <rect x="107" y="233" width="38" height="58"></rect>
+          <rect x="314" y="170" width="86" height="66"></rect>
+          <rect x="203" y="237" width="86" height="18"></rect>
+          <rect x="422" y="231" width="72" height="40"></rect>
+          <rect x="512" y="290" width="42" height="60"></rect>
+          <rect x="512" y="356" width="42" height="70"></rect>
+          <rect x="512" y="432" width="42" height="60"></rect>
+          <rect x="513" y="480" width="42" height="60"></rect>
+          <rect x="562" y="474" width="46" height="58"></rect>
+          <rect x="611" y="472" width="42" height="58"></rect>
+          <rect x="728" y="431" width="40" height="42"></rect>
+          <rect x="743" y="246" width="46" height="42"></rect>
+          <rect x="743" y="287" width="46" height="40"></rect>
+          <rect x="798" y="306" width="42" height="52"></rect>
+          <rect x="862" y="392" width="40" height="46"></rect>
+          <rect x="802" y="248" width="42" height="40"></rect>
+          <rect x="905" y="347" width="42" height="40"></rect>
+          <rect x="985" y="372" width="46" height="120"></rect>
+          <rect x="1040" y="375" width="46" height="120"></rect>
+          <rect x="1060" y="130" width="52" height="70"></rect>
+          <rect x="898" y="44" width="46" height="46"></rect>
+          <rect x="980" y="55" width="42" height="42"></rect>
+          <rect x="1216" y="452" width="62" height="30"></rect>
+        </g>
+        <g fill="#f5efd7" stroke="#ddd3ae" stroke-width="1">
+          <path d="M88,214 L1002,236 L1002,250 L88,228 Z"></path>
+          <path d="M0,518 L1288,544 L1288,558 L0,532 Z"></path>
+          <path d="M1288,544 L1330,488 L1380,440 L1380,456 L1340,498 L1300,556 Z"></path>
+          <path d="M88,226 L104,226 L104,526 L88,526 Z"></path>
+          <path d="M290,206 L306,206 L306,530 L290,530 Z"></path>
+          <path d="M404,178 L420,178 L420,534 L404,534 Z"></path>
+          <path d="M497,182 L513,182 L513,528 L497,528 Z"></path>
+          <path d="M655,186 L671,186 L671,532 L655,532 Z"></path>
+          <path d="M844,196 L860,196 L860,546 L844,546 Z"></path>
+          <path d="M1025,189 L1041,189 L1041,539 L1025,539 Z"></path>
+          <path d="M1217,227 L1255,213 L1277,121 L1309,65 L1323,73 L1291,129 L1269,221 L1219,241 Z"></path>
+          <path d="M1108,166 L1150,196 L1200,214 L1240,266 L1258,320 L1282,392 L1290,470 L1274,532 L1240,560 L1240,546 L1262,522 L1276,466 L1268,396 L1244,326 L1226,274 L1188,226 L1142,208 L1102,180 Z"></path>
+        </g>
+        <g>
+          <rect x="34" y="122" width="202" height="92" fill="#f0ece3" stroke="#2b3540" stroke-width="2.4"></rect>
+          <rect x="42" y="132" width="58" height="56" fill="#8f959b" stroke="#6f757a" stroke-width="1"></rect>
+          <rect x="106" y="134" width="38" height="52" fill="#a8aeb4" stroke="#6f757a" stroke-width="1"></rect>
+          <rect x="152" y="128" width="80" height="66" fill="#8f959b" stroke="#6f757a" stroke-width="1"></rect>
+        </g>
+        <g fill="#cbe2f2" stroke="#c0392b" stroke-width="1.4" stroke-dasharray="7 3 2 3">
+          <rect x="107" y="293" width="154" height="48"></rect>
+          <rect x="103" y="359" width="156" height="36"></rect>
+          <rect x="251" y="255" width="38" height="107"></rect>
+          <rect x="516" y="195" width="134" height="31"></rect>
+          <rect x="671" y="204" width="173" height="27"></rect>
+          <rect x="514" y="242" width="64" height="32"></rect>
+          <rect x="671" y="382" width="159" height="36"></rect>
+          <rect x="797" y="98" width="50" height="59"></rect>
+          <rect x="810" y="158" width="36" height="46"></rect>
+          <rect x="674" y="322" width="120" height="60"></rect>
+          <rect x="677" y="489" width="104" height="41"></rect>
+          <rect x="785" y="491" width="55" height="41"></rect>
+        </g>
+        <rect x="577" y="291" width="76" height="182" fill="#cfe4f2" stroke="#8fb6d2" stroke-width="1.2"></rect>
+        <g stroke="#a8cbe2" stroke-width="1">
+          <path d="M605,318 L605,500"></path>
+          <path d="M624,318 L624,500"></path>
+          <path d="M643,318 L643,500"></path>
+        </g>
+        <rect x="671" y="244" width="60" height="34" fill="#cfe4f2" stroke="#8fb6d2" stroke-width="1.2"></rect>
+        <g fill="#8f959b" stroke="#6f757a" stroke-width="1.2">
+          <rect x="867" y="112" width="103" height="95"></rect>
+          <rect x="860" y="245" width="173" height="82"></rect>
+          <rect x="861" y="415" width="80" height="120"></rect>
+        </g>
+        <g fill="#b9c0c6" stroke="#8b9298" stroke-width="1">
+          <rect x="865" y="349" width="34" height="26"></rect>
+        </g>
+        <g>
+          <rect x="1103" y="518" width="139" height="23" fill="#ffffff" stroke="#8b9298" stroke-width="1"></rect>
+          <text x="1172.5" y="533" fill="#243642" font-size="11" font-weight="700" text-anchor="middle">자재지원부</text>
+        </g>
+        <g>
+          <rect id="berth-dock2" x="345" y="238" width="54" height="314" fill="#cdeacf" stroke="#86b892" stroke-width="1.6"></rect>
+          <rect id="berth-dock1" x="425" y="269" width="50" height="284" fill="#cdeacf" stroke="#86b892" stroke-width="1.6"></rect>
+        </g>
+        <g>
+          <rect id="berth-1berth" x="953" y="315" width="26" height="222" fill="#c6dcec" stroke="#7fa5c0" stroke-width="1.2"></rect>
+        </g>
+        <g fill="#ffffff" stroke="#a9b0b6" stroke-width="1">
+          <path d="M0,540 L1288,566 L1288,574 L0,548 Z"></path>
+          <rect id="berth-dolphin2" x="157" y="548" width="9" height="216"></rect>
+          <rect x="140" y="614" width="43" height="14"></rect>
+          <rect id="berth-dolphin1" x="648" y="554" width="9" height="212"></rect>
+          <rect x="631" y="620" width="43" height="14"></rect>
+        </g>
+        <g>
+          <rect x="164" y="485" width="88" height="26" rx="4" fill="#ffe066" stroke="#d4a017" stroke-width="1.2"></rect>
+          <text x="208" y="502" fill="#243642" font-size="11.5" font-weight="700" text-anchor="middle">외업2관</text>
+        </g>
+        <g>
+          <rect id="berth-floating" x="957" y="568" width="17" height="146" fill="#ffffff" stroke="#a89e8c" stroke-width="1.2"></rect>
+          <text x="965.5" y="622" fill="#243642" font-size="9" font-weight="700" text-anchor="middle">플</text>
+          <text x="965.5" y="635" fill="#243642" font-size="9" font-weight="700" text-anchor="middle">로</text>
+          <text x="965.5" y="648" fill="#243642" font-size="9" font-weight="700" text-anchor="middle">팅</text>
+        </g>
+        <g>
+          <rect x="406" y="440" width="16" height="80" rx="3" fill="#ffe066" stroke="#d4a017" stroke-width="1.2"></rect>
+          <text x="414" y="461" fill="#243642" font-size="9" font-weight="700" text-anchor="middle">외</text>
+          <text x="414" y="474" fill="#243642" font-size="9" font-weight="700" text-anchor="middle">업</text>
+          <text x="414" y="487" fill="#243642" font-size="9" font-weight="700" text-anchor="middle">1</text>
+          <text x="414" y="500" fill="#243642" font-size="9" font-weight="700" text-anchor="middle">관</text>
+        </g>
+        <g fill="#2b3540" font-size="15" font-weight="700" text-anchor="middle" stroke="#cfe8d4" stroke-width="3" data-tier="major" paint-order="stroke" stroke-linejoin="round">
+          <text x="373" y="416">2도크</text>
+          <text x="448" y="426">1도크</text>
+        </g>
+        <g fill="#1c4f7c" font-size="16" font-weight="700" text-anchor="middle" stroke="#dbe9f4" stroke-width="3.5" data-tier="major" paint-order="stroke" stroke-linejoin="round">
+          <text x="161" y="552">2안벽</text>
+          <text x="651" y="566">1안벽</text>
+          <text x="161" y="780">2돌핀</text>
+          <text x="651" y="781">1돌핀</text>
+        </g>
+        <g data-tier="major" transform="translate(989,379) rotate(-90)">
+          <text x="0" y="4" fill="#1c4f7c" font-size="13" font-weight="700" text-anchor="middle" stroke="#c6dcec" stroke-width="3">1BERTH</text>
+        </g>
+        <g fill="#243642" font-size="11" font-weight="600" text-anchor="middle" stroke="#f4f1ea" stroke-width="2.6" data-tier="zone" paint-order="stroke" stroke-linejoin="round">
+          <text x="176" y="321">제3도장공장</text>
+          <text x="176" y="381">제4도장공장</text>
+          <text x="269" y="312">제3도장</text>
+          <text x="584" y="216">제2도장공장</text>
+          <text x="765" y="223">제2도장공장</text>
+          <text x="551" y="265">선행의장공장</text>
+          <text x="617" y="395">대조립공장</text>
+          <text x="705" y="266">54Bay</text>
+          <text x="744" y="405">판넬조립공장</text>
+          <text x="726" y="514">소조립공장</text>
+          <text x="812" y="517">가공공장</text>
+          <text x="810" y="135">제5도장공장</text>
+          <text x="813" y="184">제1도장공장</text>
+          <text x="923" y="166">중조립공장</text>
+          <text x="943" y="293">판넬2공장</text>
+          <text x="888" y="511">GAS STATION #1</text>
+        </g>
+        <g fill="#4a5560" font-size="12" font-weight="700" text-anchor="middle" stroke="#e9e1d4" stroke-width="2.4" data-tier="zone" paint-order="stroke" stroke-linejoin="round">
+          <text x="40" y="243">R2</text>
+          <text x="40" y="334">T1</text>
+          <text x="43" y="381">T2</text>
+          <text x="42" y="439">T3</text>
+          <text x="41" y="485">T4</text>
+          <text x="46" y="532">R7</text>
+          <text x="153" y="435">R4</text>
+          <text x="244" y="435">R4</text>
+          <text x="275" y="381">R3</text>
+          <text x="146" y="490">R5</text>
+          <text x="213" y="542">Q2</text>
+          <text x="283" y="252">R1</text>
+          <text x="327" y="404">P3</text>
+          <text x="357" y="203">P4</text>
+          <text x="453" y="261">P2</text>
+          <text x="487" y="425">M2</text>
+          <text x="484" y="546">M1</text>
+          <text x="533" y="320">G1</text>
+          <text x="534" y="394">B6</text>
+          <text x="534" y="473">S3</text>
+          <text x="533" y="524">J0</text>
+          <text x="586" y="502">B7</text>
+          <text x="627" y="524">B8</text>
+          <text x="691" y="440">Y2</text>
+          <text x="746" y="455">Y2</text>
+          <text x="763" y="266">B2</text>
+          <text x="768" y="309">B3</text>
+          <text x="818" y="339">B1</text>
+          <text x="826" y="271">B1</text>
+          <text x="810" y="444">S02</text>
+          <text x="875" y="406">Y3</text>
+          <text x="928" y="426">Y3</text>
+          <text x="926" y="386">G5</text>
+          <text x="878" y="367">G5</text>
+          <text x="1005" y="436">P5</text>
+          <text x="1064" y="432">P6</text>
+          <text x="1085" y="172">A2</text>
+          <text x="923" y="69">A4</text>
+          <text x="1004" y="80">A3</text>
+        </g>
+        <g fill="#4a5560" font-size="10.5" font-weight="600" text-anchor="middle" stroke="#f4f1ea" stroke-width="2.4" data-tier="minor" paint-order="stroke" stroke-linejoin="round">
+          <text x="62" y="107">R901</text>
+          <text x="110" y="105">R902</text>
+          <text x="157" y="107">R903</text>
+          <text x="204" y="110">R904</text>
+          <text x="250" y="106">R905</text>
+        </g>
+        <g fill="rgba(60,60,67,0.60)" font-size="12" font-weight="600" text-anchor="middle" data-tier="minor">
+          <text x="269" y="188">삼호1차</text>
+          <text x="1002" y="37">GAS STATION #4</text>
+          <text x="1100" y="329">GAS STATION #2</text>
+          <text x="1207" y="410">산(호텔)</text>
+          <text x="1247" y="470">호텔</text>
+        </g>
+        <g>
+          <rect x="674" y="451" width="42" height="24" rx="4" fill="#ffe066" stroke="#d4a017" stroke-width="1.2"></rect>
+          <text x="695" y="467" fill="#243642" font-size="9.5" font-weight="700" text-anchor="middle">생산관</text>
+        </g>
+        <g>
+          <rect x="880" y="207" width="95" height="29" rx="4" fill="#ffe066" stroke="#d4a017" stroke-width="1.2"></rect>
+          <text x="927.5" y="225" fill="#243642" font-size="11.5" font-weight="700" text-anchor="middle">외업3관</text>
+        </g>
+      </svg>
