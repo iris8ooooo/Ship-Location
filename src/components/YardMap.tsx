@@ -35,8 +35,8 @@ export const YARD_REGIONS: YardRegion[] = [
   { id: 'quay1',    label: '1안벽',  x: 910,  y: 700, w: 700, h: 300 },
   { id: 'dolphin2', label: '2돌핀',  x: 370,  y: 830, w: 300, h: 340 },
   { id: 'dolphin1', label: '1돌핀',  x: 1220, y: 830, w: 300, h: 340 },
-  { id: 'floating', label: '플로팅', x: 1760, y: 820, w: 300, h: 300 },
-  { id: 'berth1',   label: '1BERTH', x: 1480, y: 940, w: 330, h: 230 },
+  { id: 'floating', label: '플로팅', x: 1550, y: 950, w: 200, h: 240 },
+  { id: 'berth1',   label: '1BERTH', x: 1550, y: 760, w: 190, h: 210 },
   { id: 'all',      label: '전체',   x: 150,  y: 20,  w: 2250, h: 1140 },
 ];
 
@@ -90,7 +90,7 @@ const PLOTS: [number, number, number, number, string?][] = [
   [1600, 405, 85,  50, 'B2'], [1600, 470, 85, 50, 'B3'],
   [1700, 475, 85,  50, 'B1'], [1795, 475, 60, 50, 'B4'],
   [1420, 790, 55,  50, 'Y2'], [1490, 790, 55, 50, 'Y2'],
-  [1700, 800, 55,  45, 'S02'], [1762, 800, 55, 45, 'S01'],
+  [1712, 795, 55,  45, 'S02'], [1774, 795, 55, 45, 'S01'],
   [1960, 470, 55,  50, 'Y3'], [2025, 470, 55, 50, 'Y3'],
   [1960, 535, 55,  50, 'G5'], [2025, 535, 55, 50, 'G5'],
   [2100, 505, 85, 115, 'P5'], [1920, 620, 80, 65, 'P5'],
@@ -133,8 +133,8 @@ const BAYS: [number, number, string][] = [
   [1900, 606, '53 Bay'], [1900, 629, '53-1 Bay'],
   [1860, 420, '50 Bay'], [1860, 445, '50 Bay'],
   [1435, 700, '72 Bay'],
-  [1600, 800, '33 · 34 · 35 · 36 Bay'],
-  [1845, 800, '21 ~ 26 Bay'],
+  [1655, 748, '33 · 34 · 35 · 36 Bay'],
+  [1830, 748, '21 ~ 26 Bay'],
 ];
 
 /** 지명·시설 라벨 [x, y, 텍스트, 크기?] */
@@ -230,7 +230,7 @@ export default function YardMap() {
 
       {/* ── 안벽 ─────────────────────────────────────────── */}
       <line x1={230} y1={QUAY_Y} x2={1730} y2={QUAY_Y} stroke="#5b5b5b" strokeWidth={5} />
-      {[[400, '2안벽 A'], [780, '2안벽 B'], [1120, '1안벽 A'], [1450, '1안벽 B']]
+      {[[400, '2안벽 B'], [780, '2안벽 A'], [1120, '1안벽 B'], [1450, '1안벽 A']]
         .map(([x, t], i) => (
           <TextLabel key={i} x={x as number} y={QUAY_Y + 30} t={t as string} size={17} weight={700} fill="#173a4d" />
         ))}
@@ -243,15 +243,15 @@ export default function YardMap() {
         </g>
       ))}
 
-      {/* ── 1BERTH ───────────────────────────────────────── */}
-      <rect x={1540} y={965} width={210} height={110} rx={12}
-            fill="#e7eff4" stroke="#4a4a4a" strokeWidth={2} />
-      <TextLabel x={1645} y={1030} t="1BERTH" size={19} weight={800} />
+      {/* ── 1BERTH — 1안벽 A 동쪽 끝, 안벽에 붙은 육지 구획 ── */}
+      <rect x={1584} y={790} width={122} height={170}
+            fill="none" stroke="#c2410c" strokeWidth={3} />
+      <TextLabel x={1645} y={845} t="1BERTH" size={16} weight={800} fill="#9a3412" />
 
-      {/* ── 플로팅 도크 ──────────────────────────────────── */}
-      <rect x={1820} y={880} width={185} height={185} rx={16}
+      {/* ── 플로팅 도크 — 1BERTH 바로 아래 물 위 ──────────── */}
+      <rect x={1614} y={987} width={69} height={176} rx={6}
             fill="#dcdcdc" stroke={C.grayLn} strokeWidth={2} />
-      <TextLabel x={1912} y={980} t="플로팅도크" size={17} weight={700} />
+      <TextLabel x={1770} y={1082} t="플로팅" size={18} weight={700} fill="#173a4d" />
 
       {/* ── 라벨 ─────────────────────────────────────────── */}
       {BAYS.map(([x, y, t], i) => <TextLabel key={i} x={x} y={y} t={t} size={13} weight={500} />)}
