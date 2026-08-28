@@ -27,7 +27,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Check that GCP secrets are configured
+        id: precheck
+        run: |
+          if [ -z "${{ secrets.GCP_PROJECT_ID }}" ] \
+          || [ -z "${{ secrets.GCP_WIF_PROVIDER }}" ] \
+          || [ -z "${{ secrets.GCP_SERVICE_ACCOUNT }}" ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::GCP secrets are not set yet - skipping deploy. See README for the one-time setup."
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Authenticate to Google Cloud
+        if: steps.precheck.outputs.ready == 'true'
         uses: google-github-actions/auth@v2
         with:
           project_id: ${{ secrets.GCP_PROJECT_ID }}
@@ -35,9 +48,11 @@ jobs:
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
       - name: Set up gcloud
+        if: steps.precheck.outputs.ready == 'true'
         uses: google-github-actions/setup-gcloud@v2
 
       - name: Deploy new revision to the existing service
+        if: steps.precheck.outputs.ready == 'true'
         run: |
           gcloud run deploy "$SERVICE" \
             --source . \
@@ -47,6 +62,7 @@ jobs:
             --quiet
 
       - name: Print the (unchanged) service URL
+        if: steps.precheck.outputs.ready == 'true'
         run: |
           gcloud run services describe "$SERVICE" \
             --region "$REGION" \
