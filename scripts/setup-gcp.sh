@@ -33,11 +33,11 @@ warn() { printf '  \033[33m!\033[0m %s\n' "$*"; }
 say "0. 대상 확인 — 여기서 틀리면 URL이 바뀐다"
 gcloud config set project "$PROJECT_ID" >/dev/null 2>&1
 
-CURRENT_URL="$(gcloud run services describe "$SERVICE" \
+ALL_URLS="$(gcloud run services describe "$SERVICE" \
   --region "$REGION" --project "$PROJECT_ID" \
-  --format='value(status.url)' 2>/dev/null || true)"
+  --format='get(status.url,status.urls)' 2>/dev/null | tr -s '[:space:]' ' ' | sed 's/ $//' || true)"
 
-if [ -z "$CURRENT_URL" ]; then
+if [ -z "$ALL_URLS" ]; then
   warn "서비스 '$SERVICE'를 $REGION / $PROJECT_ID 에서 찾지 못했다."
   warn "이 상태로 배포하면 새 서비스가 만들어져 URL이 달라진다. 중단한다."
   warn "아래로 실제 위치를 확인한 뒤 PROJECT_ID/REGION/SERVICE 를 맞춰 다시 실행할 것:"
@@ -45,10 +45,24 @@ if [ -z "$CURRENT_URL" ]; then
   exit 1
 fi
 ok "서비스 확인: $SERVICE ($REGION)"
-ok "현재 URL   : $CURRENT_URL"
-echo "$CURRENT_URL" | grep -q "^https://${SERVICE}-${PROJECT_NUMBER}\.${REGION}\.run\.app$" \
-  && ok "URL이 예상 형식과 일치 — 리비전 배포로 주소가 유지된다" \
-  || warn "URL 형식이 예상과 다르다: $CURRENT_URL (계속 진행하되 첫 배포 후 주소를 반드시 확인할 것)"
+
+# Cloud Run은 모든 서비스에 해시 URL을 부여하고, 이름 길이가 허용되면 결정적 URL도
+# 추가로 부여한다. 둘 다 같은 서비스로 연결되고 재배포해도 바뀌지 않는다.
+# 따라서 형식을 따지지 말고 "어떤 주소들이 붙어 있는지"를 기록해 두는 것이 핵심이다.
+HASHED="$(printf '%s' "$ALL_URLS" | tr ' ;' '\n\n' | grep -E '\.a\.run\.app$' | sort -u || true)"
+DETERM="$(printf '%s' "$ALL_URLS" | tr ' ;' '\n\n' | grep -E "^https://${SERVICE}-${PROJECT_NUMBER}\.${REGION}\.run\.app$" | sort -u || true)"
+
+echo
+echo "  이 서비스에 연결된 주소:"
+[ -n "$HASHED" ] && printf '    해시 형식   : %s\n' $HASHED
+[ -n "$DETERM" ] && printf '    결정적 형식 : %s\n' $DETERM
+[ -z "$DETERM" ] && warn "결정적 형식 주소는 조회 결과에 없다. 평소 쓰던 주소가 이 형식이라면 브라우저로 한 번 확인할 것."
+echo
+
+if [ -n "$HASHED" ]; then
+  warn "해시 형식 주소가 있다. 이 주소의 해시는 재현 불가능하므로,"
+  warn "서비스를 삭제하면 영영 되찾을 수 없다. 절대 삭제하지 말 것."
+fi
 
 # ── 1. API ──────────────────────────────────────────────────────────────
 say "1. 필요한 API 활성화"
@@ -152,6 +166,6 @@ cat <<EOF
 
  등록 후 Actions 탭에서 "Deploy to Cloud Run" → Run workflow 로 첫 배포.
  배포 후에도 주소는 그대로여야 한다:
-   ${CURRENT_URL}
+   ${ALL_URLS}
 ────────────────────────────────────────────────────────────────────
 EOF
