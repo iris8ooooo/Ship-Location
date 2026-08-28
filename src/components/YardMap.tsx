@@ -28,6 +28,7 @@ export const YARD_REGIONS: YardRegion[] = [
   { id: 'dolphin2', label: '2돌핀',  x: 170,  y: 580, w: 260, h: 320 },
   { id: 'dolphin1', label: '1돌핀',  x: 980,  y: 580, w: 260, h: 320 },
   { id: 'floating', label: '플로팅', x: 1580, y: 600, w: 300, h: 260 },
+  { id: 'berth1',   label: '1BERTH', x: 1560, y: 400, w: 340, h: 260 },
   { id: 'all',      label: '전체',   x: 0,    y: 0,   w: 2000, h: 900 },
 ];
 
@@ -142,8 +143,26 @@ export default function YardMap() {
 
       {/* ── 안벽 ─────────────────────────────────────────── */}
       <rect x={0} y={COAST - 14} width={1560} height={16} fill={C.quay} stroke="#98a1a8" strokeWidth={2} />
-      <text x={300} y={572} fontSize={30} fontWeight={800} fill={C.ink} textAnchor="middle">2안벽</text>
-      <text x={1230} y={572} fontSize={30} fontWeight={800} fill={C.ink} textAnchor="middle">1안벽</text>
+
+      {/* 안벽은 A / B 선석으로 나뉜다. 어느 쪽이 A 인지는 확인 필요 — 일단 좌측을 A 로 둔다. */}
+      {([
+        ['2안벽', 0, 680],
+        ['1안벽', 860, 1560],
+      ] as [string, number, number][]).map(([name, x0, x1]) => {
+        const mid = (x0 + x1) / 2;
+        return (
+          <g key={name}>
+            <line x1={mid} y1={COAST - 26} x2={mid} y2={COAST + 6}
+                  stroke="#7d868d" strokeWidth={3} strokeDasharray="6 5" />
+            <text x={(x0 + mid) / 2} y={COAST - 24} fontSize={19} fontWeight={700}
+                  fill="#5b666e" textAnchor="middle">{`${name} A`}</text>
+            <text x={(mid + x1) / 2} y={COAST - 24} fontSize={19} fontWeight={700}
+                  fill="#5b666e" textAnchor="middle">{`${name} B`}</text>
+            <text x={mid} y={COAST + 46} fontSize={28} fontWeight={800}
+                  fill={C.ink} textAnchor="middle">{name}</text>
+          </g>
+        );
+      })}
 
       {/* ── 돌핀 (photo 2돌핀 x120-160 / 1돌핀 x512-550, y360-512) ── */}
       {[{ x: 248, label: '2돌핀' }, { x: 1058, label: '1돌핀' }].map(d => (
@@ -164,7 +183,6 @@ export default function YardMap() {
       {/* ── 선석 코드 — 세이프티원 '위치' 칼럼과 대조하는 핵심 라벨 ── */}
       {([
         ['2Q-2', 150, 640], ['2Q-1', 300, 640], ['2D-1', 425, 640],
-        ['0Q-3', 640, 292],
         ['DH-2', 838, 443], ['DH-1', 848, 558], ['1D-1', 786, 521],
         ['1Q-2', 1023, 640], ['1Q-1', 1219, 640],
         ['1D-2', 1643, 685], ['1D-1', 1748, 782],
