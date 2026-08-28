@@ -31,8 +31,8 @@ export interface YardRegion {
  * 세이프티원 도면에는 '안벽' 이라고만 적혀 있어 1/2 구분은 사내 명칭을 따랐다.
  */
 export const YARD_REGIONS: YardRegion[] = [
-  { id: 'dock2',    label: '2도크',  x: 325, y: 225, w: 95,  h: 315 },
-  { id: 'dock1',    label: '1도크',  x: 405, y: 255, w: 90,  h: 290 },
+  { id: 'dock2',    label: '2도크',  x: 325, y: 225, w: 95,  h: 335 },
+  { id: 'dock1',    label: '1도크',  x: 405, y: 255, w: 90,  h: 305 },
   { id: 'quay2',    label: '2안벽',  x: 20,  y: 470, w: 620, h: 150 },
   { id: 'quay1',    label: '1안벽',  x: 640, y: 490, w: 650, h: 150 },
   { id: 'dolphin2', label: '2돌핀',  x: 80,  y: 530, w: 165, h: 250 },
