@@ -96,6 +96,24 @@ gcloud firestore import "${BUCKET}/manual-<STAMP>" \
 
 ---
 
+## 삭제 방지
+
+이 DB는 삭제 방지가 켜져 있다. 실수로도 지워지지 않는다.
+
+```bash
+gcloud firestore databases describe --database="$DB" --project="$PROJECT_ID" \
+  --format='value(deleteProtectionState)'
+```
+
+경로 B의 구글식 in-place 복구처럼 **정말로 원본을 지워야 하는 경우에만** 먼저 끈다.
+끄기 전에 백업이 실제로 존재하는지 반드시 확인할 것.
+
+```bash
+gcloud firestore databases update --database="$DB" --no-delete-protection --project="$PROJECT_ID"
+```
+
+---
+
 ## 현재 백업 상태 확인
 
 ```bash

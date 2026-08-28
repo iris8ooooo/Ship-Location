@@ -90,9 +90,23 @@ fi
 if printf '%s' "$EXISTING" | grep -qi 'WEEKLY'; then
   ok "주간 예약 이미 존재"
 else
+  # weekly 는 --day-of-week 가 필수다 (MON..SUN, UTC 기준)
   gcloud firestore backups schedules create --database="$DB" \
-    --recurrence=weekly --retention=14w --project="$PROJECT_ID"
-  ok "주간 생성 (14주 보관)"
+    --recurrence=weekly --retention=14w --day-of-week=SUN --project="$PROJECT_ID"
+  ok "주간 생성 (14주 보관, 매주 일요일 UTC)"
+fi
+
+# ── 5. 삭제 방지 ─────────────────────────────────────────────────────────
+say "5. 데이터베이스 삭제 방지"
+DP="$(gcloud firestore databases describe --database="$DB" \
+  --project="$PROJECT_ID" --format='value(deleteProtectionState)' 2>/dev/null || true)"
+if printf '%s' "$DP" | grep -qi 'ENABLED'; then
+  ok "이미 켜져 있음"
+else
+  gcloud firestore databases update --database="$DB" \
+    --delete-protection --project="$PROJECT_ID" >/dev/null
+  ok "활성화됨 — 이제 이 DB는 실수로도 삭제되지 않는다"
+  warn "정말 지워야 할 일이 생기면 먼저 --no-delete-protection 로 꺼야 한다"
 fi
 
 # ── 결과 ────────────────────────────────────────────────────────────────
