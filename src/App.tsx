@@ -53,7 +53,7 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
   console.error('Firestore Error: ', JSON.stringify(errInfo));
   throw new Error(JSON.stringify(errInfo));
 }
-import { RotateCcw, X, MessageSquare, ChevronUp, ChevronDown, Droplets, ArrowUpCircle, ArrowDownCircle, Lock, Unlock, ZoomIn, ZoomOut } from 'lucide-react';
+import { RotateCcw, X, MessageSquare, SlidersHorizontal, ChevronUp, ChevronDown, Droplets, ArrowUpCircle, ArrowDownCircle, Lock, Unlock, ZoomIn, ZoomOut } from 'lucide-react';
 
 interface ShipData {
   x: number;
@@ -99,6 +99,11 @@ export default function App() {
   const [tapCount, setTapCount] = useState(0);
   const [user, setUser] = useState<User | null>(null);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  // 세로 공간이 좁은 화면(폰 가로 등)에서는 패널이 지도를 통째로 덮으므로
+  // 처음부터 접어둔다. 넉넉한 화면에서는 펼친 채로 시작한다.
+  const [panelsOpen, setPanelsOpen] = useState(
+    () => typeof window === 'undefined' ? true : window.innerHeight >= 600
+  );
   const [infoTab, setInfoTab] = useState<'tide' | 'wind'>('tide');
   const [windData, setWindData] = useState<{speed: number, direction: string, degrees: number, time: string, hourly: { speeds: number[] }} | null>(null);
   const [tideData, setTideData] = useState<TideInfo | null>(null);
@@ -132,7 +137,10 @@ export default function App() {
       // 가로로 논리 좌표 약 1400 폭이 들어오도록 잡는다. 세로가 아니라 가로를
       // 기준으로 삼는 이유는, 야드가 가로로 길어서 세로에 맞추면 폭이 너무
       // 좁게 잘리기 때문이다. 위아래 여백은 패널이 어차피 덮는다.
-      const z = Math.max(0.4, Math.min(0.95, vw / 1400));
+      // 가로로는 논리 좌표 약 1400 폭이 들어오게 하되, 세로로 화면보다 지도가
+      // 짧아져 배경이 드러나는 일이 없도록 세로를 덮는 배율을 하한으로 둔다.
+      const MAP_H = 1400;
+      const z = Math.max(0.4, Math.min(1.1, Math.max(vw / 1400, vh / MAP_H)));
       setZoom(z);
       requestAnimationFrame(() => {
         // 도크와 안벽이 있는 작업 구간(논리 y 150 부터)을 화면 위에 둔다.
@@ -708,7 +716,7 @@ export default function App() {
 
   if (showNamePrompt) {
     return (
-      <div className="w-screen h-screen bg-[#2c3e50] flex flex-col items-center justify-center font-sans">
+      <div className="w-screen h-[100dvh] bg-[#2c3e50] flex flex-col items-center justify-center font-sans">
         <div className="bg-white p-8 rounded-xl shadow-2xl flex flex-col items-center w-80">
           <h2 className="text-2xl font-bold mb-2 text-gray-800">관리자 접속</h2>
           <p className="text-sm text-gray-600 mb-6 text-center">작업 이력에 남길<br/>성함을 입력해주세요.</p>
@@ -742,7 +750,7 @@ export default function App() {
   }
 
   return (
-    <div className="w-screen h-screen bg-[#2c3e50] font-sans overflow-hidden flex flex-col">
+    <div className="w-screen h-[100dvh] bg-[#2c3e50] font-sans overflow-hidden flex flex-col">
       {/* Top Header Container */}
       <div className="fixed top-2 left-2 right-2 z-50 flex justify-between items-start pointer-events-none gap-2">
         {/* Title Panel */}
@@ -776,6 +784,7 @@ export default function App() {
 
       {/* History Bottom Drawer */}
       <div 
+        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
         className={`fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] z-50 transition-transform duration-300 ease-in-out ${isHistoryOpen ? 'translate-y-0' : 'translate-y-[calc(100%-48px)]'}`}
       >
         <div 
@@ -817,8 +826,18 @@ export default function App() {
 
 
 
+      {/* 패널 도크 — 조석/바람 패널과 배 추가 패널을 한 덩어리로 묶는다.
+          폰 세로: 화면 아래에 가로로 눕는다.
+          md 이상(아이패드·데스크톱): 오른쪽에 좁은 세로 패널로 붙어 지도를 넓게 쓴다.
+          접으면 화면 밖으로 밀려나 지도를 전혀 가리지 않는다. */}
+      <div
+        className={`fixed z-40 flex flex-col gap-2 transition-transform duration-300 ease-out
+          left-2 right-2 bottom-[calc(3.5rem+env(safe-area-inset-bottom))]
+          md:left-auto md:right-2 md:top-16 md:bottom-auto md:w-[330px]
+          ${panelsOpen ? '' : 'translate-y-[135%] md:translate-y-0 md:translate-x-[115%]'}`}
+      >
       {/* Info Panel (Tide / Wind) */}
-      <div className={`fixed ${appMode === 'admin' ? 'bottom-[180px] lg:top-32' : 'bottom-16 lg:top-16'} left-2 right-2 lg:bottom-auto lg:left-auto lg:right-2 bg-white/95 p-3 rounded-lg z-40 shadow-md flex flex-col gap-1.5 w-auto lg:w-72 transition-all duration-300`}>
+      <div className={`bg-white/95 p-3 rounded-lg shadow-md flex flex-col gap-1.5 w-auto transition-all`}>
         <div className="flex justify-between items-center border-b border-gray-200 pb-1">
           <div className="flex gap-3">
             <button 
@@ -912,7 +931,7 @@ export default function App() {
 
       {/* Add Ship Panel */}
       {appMode === 'admin' && (
-        <div className="fixed bottom-16 left-2 right-2 lg:bottom-auto lg:top-16 lg:left-auto lg:right-2 bg-white/95 p-3 rounded-lg z-40 shadow-md grid grid-cols-2 gap-2 items-center lg:flex lg:flex-nowrap lg:justify-start">
+        <div className="bg-white/95 p-3 rounded-lg shadow-md grid grid-cols-2 md:grid-cols-1 gap-2 items-center">
           <select 
             value={newShipColor} 
             onChange={e => setNewShipColor(e.target.value)}
@@ -931,21 +950,29 @@ export default function App() {
           />
           <button 
             onClick={handleAddShip}
-            className="px-4 py-2 text-base bg-blue-500 hover:bg-blue-600 active:bg-blue-700 text-white font-bold rounded transition-colors whitespace-nowrap shrink-0"
+            className="px-3 sm:px-4 py-2 text-sm sm:text-base bg-blue-500 hover:bg-blue-600 active:bg-blue-700 text-white font-bold rounded transition-colors whitespace-nowrap shrink-0"
           >
             배 추가
           </button>
           <button 
             onClick={() => setIsAddingZone(!isAddingZone)}
-            className={`px-4 py-2 text-base font-bold rounded transition-colors whitespace-nowrap shrink-0 ${isAddingZone ? 'bg-red-500 hover:bg-red-600 text-white' : 'bg-purple-500 hover:bg-purple-600 text-white'}`}
+            className={`px-3 sm:px-4 py-2 text-sm sm:text-base font-bold rounded transition-colors whitespace-nowrap shrink-0 ${isAddingZone ? 'bg-red-500 hover:bg-red-600 text-white' : 'bg-purple-500 hover:bg-purple-600 text-white'}`}
           >
             {isAddingZone ? '영역 추가 취소' : '마그네틱 영역 추가'}
           </button>
         </div>
       )}
+      </div>
 
       {/* Zoom Controls */}
       <div className="fixed right-3 top-1/2 -translate-y-1/2 z-50 flex flex-col gap-2">
+        <button
+          onClick={() => setPanelsOpen(o => !o)}
+          aria-label={panelsOpen ? '패널 접기' : '패널 펼치기'}
+          className={`w-10 h-10 shadow-lg rounded-full flex items-center justify-center border transition-colors ${panelsOpen ? 'bg-blue-500 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}`}
+        >
+          <SlidersHorizontal size={20} />
+        </button>
         <button
           onClick={() => setZoom(z => Math.min(3, z + 0.2))}
           className="w-10 h-10 bg-white shadow-lg rounded-full flex items-center justify-center text-gray-700 hover:bg-gray-50 hover:text-blue-600 border border-gray-200 transition-colors"
