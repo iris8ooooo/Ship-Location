@@ -103,45 +103,27 @@ function isAdmin() {
 
 ### GCP 1회 설정
 
+`scripts/setup-gcp.sh` 가 전부 처리한다. **로컬에 gcloud를 설치할 필요 없이** Google Cloud Shell에서 돌리는 게 제일 쉽다.
+
+1. <https://console.cloud.google.com> 접속
+2. 우측 상단 터미널 아이콘으로 **Cloud Shell** 열기
+3. 실행:
+
 ```bash
-export PROJECT_ID=lng-works-482811
-export PROJECT_NUMBER=238928524992
-export REPO=iris8ooooo/Ship-Location
-
-gcloud services enable \
-  run.googleapis.com cloudbuild.googleapis.com \
-  artifactregistry.googleapis.com iamcredentials.googleapis.com \
-  --project="$PROJECT_ID"
-
-gcloud iam service-accounts create github-deployer \
-  --display-name="GitHub Actions deployer" --project="$PROJECT_ID"
-
-SA="github-deployer@${PROJECT_ID}.iam.gserviceaccount.com"
-
-for ROLE in roles/run.admin roles/cloudbuild.builds.editor \
-            roles/artifactregistry.admin roles/storage.admin \
-            roles/iam.serviceAccountUser
-do
-  gcloud projects add-iam-policy-binding "$PROJECT_ID" \
-    --member="serviceAccount:${SA}" --role="$ROLE"
-done
-
-# Workload Identity Federation (키 파일 없이 인증)
-gcloud iam workload-identity-pools create github \
-  --location=global --display-name="GitHub Actions" --project="$PROJECT_ID"
-
-gcloud iam workload-identity-pools providers create-oidc github \
-  --location=global --workload-identity-pool=github --display-name="GitHub" \
-  --attribute-mapping="google.subject=assertion.sub,attribute.repository=assertion.repository" \
-  --attribute-condition="assertion.repository=='${REPO}'" \
-  --issuer-uri="https://token.actions.githubusercontent.com" \
-  --project="$PROJECT_ID"
-
-gcloud iam service-accounts add-iam-policy-binding "$SA" \
-  --role=roles/iam.workloadIdentityUser \
-  --member="principalSet://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/github/attribute.repository/${REPO}" \
-  --project="$PROJECT_ID"
+git clone https://github.com/iris8ooooo/Ship-Location.git
+cd Ship-Location
+bash scripts/setup-gcp.sh
 ```
+
+스크립트가 하는 일:
+
+- **먼저 `hd-ship-location` 서비스가 `us-west1` / `lng-works-482811` 에 실제로 있는지 확인하고,
+  없으면 중단한다.** 잘못된 위치에 배포해서 새 서비스가 생기고 URL이 바뀌는 사고를 막기 위한 것이다.
+- 필요한 API 활성화, 배포용 서비스 계정 생성 및 권한 부여
+- Workload Identity Federation 설정 (키 파일 없이 인증, 이 저장소로만 제한)
+- 마지막에 GitHub에 등록할 시크릿 3개를 값과 함께 출력
+
+여러 번 실행해도 안전하다. 이미 만들어진 리소스는 건너뛴다.
 
 **Settings → Secrets and variables → Actions**에 등록:
 
