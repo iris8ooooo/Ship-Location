@@ -1,6 +1,6 @@
 <?xml version="1.0"?><svg vector-effect="non-scaling-stroke" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1380 840" style="background:#dbe9f4" font-family="Inter, system-ui, sans-serif" aria-label="HD현대삼호 야드 배치도">
         <rect x="0" y="0" width="1380" height="840" fill="#f4f1ea"></rect>
-        <path d="M56,540 L236,544 L716,550 L1056,554 L1344,560 L1386,494 L1436,448 L1436,814 L56,814 Z" fill="#dbe9f4"></path>
+        <path d="M-60,538 L236,544 L716,550 L1056,554 L1344,560 L1386,494 L1436,448 L1436,900 L-60,900 Z" fill="#dbe9f4"></path>
         <path d="M-13,66 L227,48 L239,28 L299,20 L387,26 L507,34 L627,40 L747,42 L845,0 L865,-92 L917,-132 L987,-142 L1029,-90 L1063,-30 L1109,2 L1139,82 L1229,132 L1259,202 L1289,272 L1319,302 L1367,320 L1317,370 L1275,436 L987,430 L647,426 L167,420 L-13,416 Z" fill="#e9e1d4" stroke="#c9c0af" stroke-width="1.2"></path>
         <g fill="#8f959b" stroke="#6f757a" stroke-width="1.2">
           <path d="M1127,267 L1175,253 L1205,273 L1218,319 L1183,344 L1141,329 L1129,297 Z"></path>

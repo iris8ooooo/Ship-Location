@@ -17,8 +17,13 @@ import mapSvg from './yard-map.svg?raw';
 export const YARD_W = 1380;
 export const YARD_H = 840;
 
-/** 첫 화면이 맞추는 범위 — 배가 실제로 놓이는 띠(도크·안벽·돌핀) */
-export const YARD_HOME = { x: 0, y: 230, w: 1060, h: 550 };
+/**
+ * 첫 화면이 맞추는 범위 — 야드 전체.
+ * 배 띠에만 맞추면 폰에서 0.78배까지 확대돼 야드의 3분의 1만 보였다. 어느 호선이
+ * 어디 있는지 찾는 앱이라 한눈에 다 보이는 쪽이 낫고, 축소해서 글자가 뭉치는 건
+ * 라벨 단계(아래 tiersFor)가 막는다.
+ */
+export const YARD_HOME = { x: 0, y: 0, w: 1380, h: 840 };
 
 export interface YardRegion {
   id: string; label: string;

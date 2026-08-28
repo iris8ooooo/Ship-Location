@@ -184,10 +184,8 @@ export default function App() {
       // 아래 하한 0.34 도 같은 이유 — 그 밑으로는 글씨가 뭉개진다.
       const H = YARD_HOME;
       const fit = Math.max(0.34, Math.min(0.9, Math.min(vw / (H.w * 1.05), vh / (H.h * 1.05))));
-      // 세로로 긴 화면에서는 위 배율로도 지도가 화면보다 짧아 아래에 빈 바다 띠가
-      // 남는다. 지역 버튼과 '최근 업데이트' 바가 덮는 190px 만 남도록 배율을 올린다.
-      const OVERLAY_H = 190;
-      const z = Math.min(0.9, Math.max(fit, (vh - OVERLAY_H) / YARD_H));
+      // 지도가 화면보다 짧아 남는 여백은 뷰포트 배경(바다색)이 그대로 이어받는다.
+      const z = Math.min(0.9, Math.max(0.28, fit));
       setZoom(z);
       zoomRef.current = z;
       homeZoomRef.current = z;
@@ -1146,7 +1144,7 @@ export default function App() {
       {/* Viewport */}
       <div 
         ref={attachViewport}
-        className="flex-1 overflow-auto relative touch-pan-x touch-pan-y bg-[#9fc9e4]"
+        className="flex-1 overflow-auto relative touch-pan-x touch-pan-y bg-[#dbe9f4]"
         onPointerDown={handleBackgroundPointerDown}
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
