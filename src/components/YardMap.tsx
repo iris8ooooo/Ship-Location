@@ -1,160 +1,261 @@
 /**
- * HD현대삼호 야드 지도 (벡터).
+ * HD현대삼호 야드 지도 — 세이프티원 3중점검 지도 기준.
  *
- * 좌표계는 앱이 쓰는 논리 공간 2000 x 1400 을 그대로 따른다. 배와 구역의 x, y 가
- * 이 공간에 저장돼 있으므로, 이 지도를 갈아끼워도 기존 위치가 그대로 살아난다.
+ * 세이프티원(https://safetyone.hshi.co.kr/#/TripleInspectionList)의 야드 도면을
+ * 트레이싱했다. 그쪽 배치를 따르는 이유는, 작업자가 그 화면을 보면서 이 앱에
+ * 배 위치를 옮겨 적고 나중에는 자동으로 가져올 것이기 때문이다. 두 지도가 같은
+ * 모양이어야 대조가 눈으로 바로 된다.
  *
- * 기존 public/map.jpg (968x828 사진을 2000x1400 으로 늘려 쓰던 것)를 트레이싱했다.
- * 사진 좌표 → 논리 좌표 환산: x * 2.0661, y * 1.6908
+ * 좌표계: 2400 x 1200. 세이프티원 도면이 가로로 길어 예전 2000x1400 에서 바꿨다.
+ * 기존에 저장된 배 좌표는 이 교체로 무효가 된다(사용자 승인됨) — 어차피
+ * 세이프티원에서 위치를 통째로 가져와 덮어쓸 예정이다.
+ *
+ * 그리는 순서가 곧 겹침 순서다: 바다 → 육지 → 도로 → 구역 → 건물 → 라벨.
+ * 도로를 구역보다 먼저 깔아야 구역 이름이 도로에 가려지지 않는다.
  */
 
-export const YARD_W = 2000;
-export const YARD_H = 1400;
+export const YARD_W = 2400;
+export const YARD_H = 1200;
+/** 안벽(육지와 바다의 경계) */
+const QUAY_Y = 960;
 
-/** 지역 바로가기. 논리 좌표 기준 사각형 — 버튼을 누르면 이 영역으로 확대한다. */
+/** 해안선 — 안벽 오른쪽 끝(1730)에서 북동쪽으로 올라가는 경계 */
+const COAST = 'L1730,960 L1900,780 L2080,700 L2230,600 L2340,470 L2385,330';
+
 export interface YardRegion {
-  id: string;
-  label: string;
+  id: string; label: string;
   x: number; y: number; w: number; h: number;
 }
 
+/** 배가 실제로 놓이는 자리 — 안벽 / 도크 / 돌핀 / 플로팅 / 1BERTH */
 export const YARD_REGIONS: YardRegion[] = [
-  { id: 'dock2',    label: '2도크',   x: 430,  y: 200, w: 240, h: 420 },
-  { id: 'dock1',    label: '1도크',   x: 650,  y: 200, w: 220, h: 420 },
-  { id: 'quay2',    label: '2안벽',   x: 120,  y: 520, w: 560, h: 220 },
-  { id: 'quay1',    label: '1안벽',   x: 880,  y: 520, w: 640, h: 220 },
-  { id: 'dolphin2', label: '2돌핀',   x: 180,  y: 600, w: 260, h: 320 },
-  { id: 'dolphin1', label: '1돌핀',   x: 1000, y: 600, w: 260, h: 320 },
-  { id: 'floating', label: '플로팅',  x: 1580, y: 620, w: 300, h: 260 },
-  { id: 'all',      label: '전체',    x: 0,    y: 0,   w: 2000, h: 780 },
+  { id: 'dock2',    label: '2도크',  x: 745,  y: 390, w: 160, h: 400 },
+  { id: 'dock1',    label: '1도크',  x: 925,  y: 390, w: 160, h: 400 },
+  { id: 'quay2',    label: '2안벽',  x: 230,  y: 700, w: 680, h: 300 },
+  { id: 'quay1',    label: '1안벽',  x: 910,  y: 700, w: 700, h: 300 },
+  { id: 'dolphin2', label: '2돌핀',  x: 370,  y: 830, w: 300, h: 340 },
+  { id: 'dolphin1', label: '1돌핀',  x: 1220, y: 830, w: 300, h: 340 },
+  { id: 'floating', label: '플로팅', x: 1760, y: 820, w: 300, h: 300 },
+  { id: 'berth1',   label: '1BERTH', x: 1480, y: 940, w: 330, h: 230 },
+  { id: 'all',      label: '전체',   x: 150,  y: 20,  w: 2250, h: 1140 },
 ];
 
+/**
+ * 첫 화면이 맞추는 범위 — 배가 실제로 놓이는 띠(도크·안벽·돌핀·플로팅).
+ * 야드 전체(2400x1200)에 맞추면 세로로 긴 폰에서 글씨가 읽을 수 없이 작아진다.
+ */
+export const YARD_HOME = { x: 200, y: 340, w: 1900, h: 790 };
+
 const C = {
-  sea:      '#9fc9e4',
-  land:     '#f1ece1',
-  quay:     '#ffffff',
-  dock:     '#bcdcf0',
-  bldg:     '#c3d8ea',
-  bldgEdge: '#7f9fbe',
-  road:     '#4b433c',
-  green:    '#b9d99a',
-  crane:    '#e79338',
-  ink:      '#22303c',
-  code:     '#c0392b',
+  out:    '#eff1ec',   // 야드 밖(시가지)
+  sea:    '#9fc9e4',   // 바다 — 뷰포트 배경색과 같게 맞췄다
+  land:   '#e9e2d4',
+  plot:   '#e3dccd',
+  road:   '#f6f2dc',
+  roadLn: '#c9c2a8',
+  shop:   '#bfe3f5',
+  shopLn: '#d0342c',
+  gray:   '#9a9a9a',
+  grayLn: '#5f5f5f',
+  dock:   '#b9b9b9',
+  ink:    '#1c1c1c',
 };
 
-/** 반복되는 공장 블록을 한 번에 그린다. */
-function Blocks({ items }: { items: [number, number, number, number][] }) {
+/** 구역 블록 [x, y, w, h, 라벨?] */
+const PLOTS: [number, number, number, number, string?][] = [
+  // ── 좌측: R / T / Q ──────────────────────────────────
+  [220, 250, 120,  90, 'R2'],
+  [220, 360, 110,  90, 'T1'], [220, 460, 110, 80, 'T2'],
+  [220, 550, 110,  80, 'T3'], [220, 640, 110, 80, 'T4'],
+  [480, 270,  80,  70, 'R1'],
+  [540, 520, 130,  55, 'R3'],
+  [360, 600, 250,  60, 'R4'],
+  [360, 680, 250,  55, 'R5'],
+  [420, 760, 220,  45, ''],            // 외업2관
+  [220, 830, 220,  70, 'R7'], [470, 830, 220, 70, 'Q2'],
+  // ── 중앙: P / 도크 사이 / M / J / G ───────────────────
+  [720, 245, 140,  95, 'P4'],
+  [685, 380,  45, 470, 'P3'],
+  [1100, 300, 80, 540, 'P2'],
+  [1200, 300, 55,  50, 'G1'], [1200, 365, 55, 55, 'B6'],
+  [1200, 440, 70, 400, 'M2'],
+  [1275, 600, 60, 280, 'J0'],
+  [1100, 880, 70,  60, 'M1'],
+  [1320, 880, 55,  55, 'S3'],
+  [1390, 880, 55,  60, 'B7'], [1455, 880, 55, 60, 'B8'],
+  [1520, 880, 50,  60, 'B9'], [1580, 880, 50, 60, 'C5'],
+  [1640, 885, 60,  50, 'Y1'],
+  // ── 우측: B / Y / S / G / P / A ──────────────────────
+  [1520, 420, 60,  55, 'B5'],
+  [1600, 405, 85,  50, 'B2'], [1600, 470, 85, 50, 'B3'],
+  [1700, 475, 85,  50, 'B1'], [1795, 475, 60, 50, 'B4'],
+  [1420, 790, 55,  50, 'Y2'], [1490, 790, 55, 50, 'Y2'],
+  [1700, 800, 55,  45, 'S02'], [1762, 800, 55, 45, 'S01'],
+  [1960, 470, 55,  50, 'Y3'], [2025, 470, 55, 50, 'Y3'],
+  [1960, 535, 55,  50, 'G5'], [2025, 535, 55, 50, 'G5'],
+  [2100, 505, 85, 115, 'P5'], [1920, 620, 80, 65, 'P5'],
+  [2010, 620, 80,  70, 'P6'], [1910, 695, 55, 48, 'G6'],
+  [2005, 60,  85,  60, 'A4'], [2100, 60, 85, 60, 'A3'], [2195, 60, 85, 60, 'A2'],
+];
+
+/** 강조 작업구역 (연파랑 + 빨강 점선) [x, y, w, h, 라벨, 라벨크기?] */
+const SHOPS: [number, number, number, number, string, number?][] = [
+  [360, 360, 310, 55, '공장, 도장쉘터 #23 / #21', 14],
+  [360, 440, 310, 55, '공장, 도장쉘터 #24 / #22', 14],
+  [360, 520, 150, 55, '제4도장공장', 14],
+  [590, 270, 100, 70, '제3도장공장', 11],
+  [1300, 340, 250, 45, '제2도장공장 (Paint Shop)', 14],
+  [1570, 340, 215, 45, '제2도장공장 (Blasting Cell)', 13],
+  [1800, 300, 110, 70, '제1도장공장', 11],
+  [1640, 240, 130, 70, '제5도장공장', 12],
+  [1360, 430, 150, 55, '선행의장공장', 14],
+  [1350, 560, 170, 200, '대조립공장', 19],
+  [1700, 405, 120, 60, '판넬공장', 14],
+  [1560, 540, 300, 80, '판넬조립공장', 17],
+  [1560, 665, 190, 105, '소조립공장', 16],
+  [1760, 665, 140, 105, '가공공장', 16],
+];
+
+/** 진회색 대형 건물 [x, y, w, h, 라벨?] */
+const GRAY: [number, number, number, number, string?][] = [
+  [2050, 130, 240, 150, '중조립공장'],
+  [2050, 320, 240, 150, '판넬2공장'],
+  [1200, 890, 110,  50, '생산관'],
+];
+
+/** Bay 라벨 [x, y, 텍스트] — 공장 이름과 겹치지 않게 건물 바깥에 세로로 세운다 */
+const BAYS: [number, number, string][] = [
+  [1975, 155, '66 Bay'], [1975, 180, '65 Bay'], [1975, 205, '64 Bay'],
+  [1975, 230, '63 Bay'], [1975, 255, '62 Bay'], [1975, 278, '61 Bay'],
+  [1975, 345, '15 Bay'], [1975, 372, '14 Bay'], [1975, 400, '13 Bay'],
+  [1975, 427, '12 Bay'], [1975, 452, '11 Bay'],
+  [1900, 560, '51 Bay'], [1900, 583, '52 Bay'],
+  [1900, 606, '53 Bay'], [1900, 629, '53-1 Bay'],
+  [1860, 420, '50 Bay'], [1860, 445, '50 Bay'],
+  [1435, 700, '72 Bay'],
+  [1600, 800, '33 · 34 · 35 · 36 Bay'],
+  [1845, 800, '21 ~ 26 Bay'],
+];
+
+/** 지명·시설 라벨 [x, y, 텍스트, 크기?] */
+const PLACES: [number, number, string, number?][] = [
+  // 야드 밖(북쪽) 지명
+  [700, 40, '삼호4차', 17], [1120, 40, '삼호서초', 17], [1180, 78, '한마음', 17],
+  [1400, 45, '삼호2차', 17], [420, 195, '삼호1차', 16], [980, 150, '갈마산', 17],
+  [1450, 195, '갈마산2', 16],
+  // 야드 안 시설
+  [420, 340, 'GAS STATION #1', 12], [1810, 637, 'GAS STATION #2', 12],
+  [1960, 80, 'GAS STATION #4', 12],
+  [610, 745, 'Air Comp #5', 11], [1000, 900, 'Air Comp #4', 11],
+  [1300, 520, 'Air Comp #3', 11], [1300, 270, 'Air Comp #2', 11],
+  [1900, 505, 'Air Comp #9', 11],
+  [1880, 250, '지원관', 12], [1875, 155, '소방대', 12], [2325, 260, '인도 본관', 12],
+  [2240, 500, '테니스장', 13], [2100, 660, '호텔', 13],
+  [1440, 520, '경계구역', 13],
+  [530, 785, '외업2관', 12],
+];
+
+/** 도로 — 구역보다 먼저 깔린다 */
+const ROADS = [
+  'M230,350 H680', 'M230,745 H700', 'M230,815 H1730',
+  'M1100,285 H2340', 'M1190,525 H2300', 'M1540,645 H2150',
+  'M345,250 V860', 'M700,245 V860', 'M915,250 V860',
+  'M1092,280 V860', 'M1270,290 V870', 'M1545,300 V870', 'M2035,60 V700',
+];
+
+function TextLabel({ x, y, t, size = 14, weight = 500, fill = C.ink }: {
+  x: number; y: number; t: string; size?: number; weight?: number; fill?: string;
+}) {
   return (
-    <>
-      {items.map(([x, y, w, h], i) => (
-        <rect key={i} x={x} y={y} width={w} height={h} rx={3}
-              fill={C.bldg} stroke={C.bldgEdge} strokeWidth={1.5} />
-      ))}
-    </>
+    <text x={x} y={y} fontSize={size} fontWeight={weight} fill={fill}
+          textAnchor="middle" fontFamily="system-ui, sans-serif">{t}</text>
   );
 }
 
 export default function YardMap() {
   return (
-    <svg
-      viewBox={`0 0 ${YARD_W} ${YARD_H}`}
-      preserveAspectRatio="none"
-      className="absolute inset-0 w-full h-full"
-      aria-label="HD현대삼호 야드 지도"
-    >
-      {/* ── 바다 ─────────────────────────────────────────── */}
-      <rect x={0} y={0} width={YARD_W} height={YARD_H} fill={C.sea} />
+    <svg viewBox={`0 0 ${YARD_W} ${YARD_H}`} preserveAspectRatio="none"
+         className="absolute inset-0 w-full h-full" aria-label="HD현대삼호 야드 지도">
+      <rect x={0} y={0} width={YARD_W} height={YARD_H} fill={C.out} />
+
+      {/* ── 바다 — 해안선 아래·서쪽 전부 ─────────────────── */}
+      <path d={`M0,290 L230,290 L230,${QUAY_Y} ${COAST} L2400,330 L2400,1200 L0,1200 Z`}
+            fill={C.sea} />
 
       {/* ── 육지 ─────────────────────────────────────────── */}
-      <path d="M0,0 H2000 V560 H1520 V600 H1180 V560 H900 V600 H560 V560 H0 Z" fill={C.land} />
+      <path
+        d={`M230,290 L230,${QUAY_Y} ${COAST} L2380,175 L2300,45 L2010,20
+            L1870,115 L1700,185 L1480,240 L1150,270 L860,250 L640,230 Z`}
+        fill={C.land} stroke="#cfc7b4" strokeWidth={2}
+      />
 
-      {/* 갈마산 */}
-      <path d="M360,20 H1160 V180 H360 Z" fill={C.green} />
-      <path d="M1240,20 H1460 V150 H1240 Z" fill={C.green} />
-      <text x={760} y={115} fontSize={40} fontWeight={700} fill="#4a6b35" textAnchor="middle">갈마산</text>
-      <text x={1350} y={100} fontSize={28} fontWeight={700} fill="#4a6b35" textAnchor="middle">갈마산</text>
+      {/* ── 도로 (구역보다 아래) ─────────────────────────── */}
+      {ROADS.map((d, i) => (
+        <path key={i} d={d} stroke={C.road} strokeWidth={22} fill="none" strokeLinecap="round" />
+      ))}
+
+      {/* ── 구역 블록 ────────────────────────────────────── */}
+      {PLOTS.map(([x, y, w, h, label], i) => (
+        <g key={i}>
+          <rect x={x} y={y} width={w} height={h} fill={C.plot} stroke={C.roadLn} strokeWidth={1.2} />
+          {label && <TextLabel x={x + w / 2} y={y + h / 2 + 5} t={label} size={15} weight={600} />}
+        </g>
+      ))}
+
+      {/* ── 진회색 대형 건물 ─────────────────────────────── */}
+      {GRAY.map(([x, y, w, h, label], i) => (
+        <g key={i}>
+          <rect x={x} y={y} width={w} height={h} fill={C.gray} stroke={C.grayLn} strokeWidth={1.5} />
+          {label && <TextLabel x={x + w / 2} y={y + h / 2 + 5} t={label} size={16} weight={700} fill="#ffffff" />}
+        </g>
+      ))}
+
+      {/* ── 강조 작업구역 ────────────────────────────────── */}
+      {SHOPS.map(([x, y, w, h, label, fs], i) => (
+        <g key={i}>
+          <rect x={x} y={y} width={w} height={h} fill={C.shop}
+                stroke={C.shopLn} strokeWidth={2} strokeDasharray="7 4" />
+          <TextLabel x={x + w / 2} y={y + h / 2 + 5} t={label} size={fs ?? 15} weight={600} />
+        </g>
+      ))}
 
       {/* ── 도크 ─────────────────────────────────────────── */}
-      <rect x={465} y={235} width={155} height={350} fill={C.dock} stroke="#6f9fc0" strokeWidth={3} />
-      <text x={542} y={430} fontSize={34} fontWeight={800} fill={C.ink} textAnchor="middle">2도크</text>
-
-      <rect x={682} y={235} width={135} height={350} fill={C.dock} stroke="#6f9fc0" strokeWidth={3} />
-      <text x={750} y={430} fontSize={34} fontWeight={800} fill={C.ink} textAnchor="middle">1도크</text>
-
-      {/* 골리앗 크레인 */}
-      {[300, 380, 470].map(y => (
-        <line key={y} x1={430} y1={y} x2={660} y2={y} stroke={C.crane} strokeWidth={11} strokeLinecap="round" />
-      ))}
-      {[330, 450].map(y => (
-        <line key={y} x1={655} y1={y} x2={850} y2={y} stroke={C.crane} strokeWidth={11} strokeLinecap="round" />
-      ))}
-
-      {/* ── 건물 블록 ─────────────────────────────────────── */}
-      <Blocks items={[
-        [70, 130, 150, 60], [240, 130, 130, 55],
-        [80, 250, 120, 45], [230, 250, 140, 45],
-        [80, 330, 160, 50], [270, 330, 150, 50],
-        [90, 420, 200, 45],
-        [880, 230, 90, 300], [1000, 250, 120, 260],
-        [1180, 200, 200, 120], [1180, 350, 200, 160],
-        [1420, 230, 150, 280], [1600, 250, 130, 240],
-        [1780, 260, 160, 230],
-      ]} />
-
-      {/* Bay 셀 (우측 반복 구획) */}
-      {Array.from({ length: 6 }).map((_, i) => (
-        <g key={i}>
-          <rect x={1180} y={210 + i * 50} width={190} height={40} rx={2}
-                fill="#d7e6f3" stroke={C.bldgEdge} strokeWidth={1} />
-          <text x={1275} y={237 + i * 50} fontSize={17} fill="#3d566e" textAnchor="middle">{`${i + 1} Bay`}</text>
+      {([['2도크', 745], ['1도크', 925]] as [string, number][]).map(([label, x]) => (
+        <g key={label}>
+          <rect x={x} y={390} width={160} height={400} rx={70}
+                fill={C.dock} stroke={C.grayLn} strokeWidth={2} />
+          <TextLabel x={x + 80} y={598} t={label} size={22} weight={800} />
         </g>
       ))}
-
-      {/* ── 도로 ─────────────────────────────────────────── */}
-      <path d="M40,215 H1960" stroke={C.road} strokeWidth={9} fill="none" strokeLinecap="round" />
-      <path d="M40,500 H860 M900,500 H1960" stroke={C.road} strokeWidth={9} fill="none" strokeLinecap="round" />
-      <path d="M430,215 V560 M860,215 V560 M1150,215 V560" stroke={C.road} strokeWidth={7} fill="none" />
-      <text x={500} y={205} fontSize={17} fill="#5b524a">메인도로</text>
-      <text x={1200} y={205} fontSize={17} fill="#5b524a">메인도로</text>
 
       {/* ── 안벽 ─────────────────────────────────────────── */}
-      <rect x={0} y={545} width={700} height={22} fill={C.quay} stroke="#9aa2a8" strokeWidth={2} />
-      <rect x={880} y={545} width={1120} height={22} fill={C.quay} stroke="#9aa2a8" strokeWidth={2} />
-      <text x={300} y={533} fontSize={30} fontWeight={800} fill={C.ink} textAnchor="middle">2안벽</text>
-      <text x={1250} y={533} fontSize={30} fontWeight={800} fill={C.ink} textAnchor="middle">1안벽</text>
+      <line x1={230} y1={QUAY_Y} x2={1730} y2={QUAY_Y} stroke="#5b5b5b" strokeWidth={5} />
+      {[[400, '2안벽 A'], [780, '2안벽 B'], [1120, '1안벽 A'], [1450, '1안벽 B']]
+        .map(([x, t], i) => (
+          <TextLabel key={i} x={x as number} y={QUAY_Y + 30} t={t as string} size={17} weight={700} fill="#173a4d" />
+        ))}
 
-      {/* ── 돌핀 ─────────────────────────────────────────── */}
-      {[{ x: 250, label: '2돌핀' }, { x: 1065, label: '1돌핀' }].map(d => (
-        <g key={d.label}>
-          <rect x={d.x} y={560} width={70} height={280} fill={C.quay} stroke="#9aa2a8" strokeWidth={2} />
-          <rect x={d.x - 22} y={840} width={114} height={70} fill={C.quay} stroke="#9aa2a8" strokeWidth={2} />
-          <rect x={d.x + 12} y={866} width={46} height={26} fill={C.crane} />
-          <text x={d.x - 70} y={700} fontSize={30} fontWeight={800} fill={C.ink} textAnchor="middle">{d.label}</text>
+      {/* ── 돌핀 (안벽에서 바다로 뻗는 잔교) ──────────────── */}
+      {([[520, '2돌핀'], [1370, '1돌핀']] as [number, string][]).map(([x, t]) => (
+        <g key={t}>
+          <rect x={x - 15} y={QUAY_Y} width={30} height={150} fill="#8d8d8d" stroke="#4a4a4a" strokeWidth={2} />
+          <TextLabel x={x} y={1145} t={t} size={18} weight={700} fill="#173a4d" />
         </g>
       ))}
 
-      {/* ── 플로팅 도크 / 1Berth ──────────────────────────── */}
-      <rect x={1640} y={660} width={130} height={190} fill={C.dock} stroke="#6f9fc0" strokeWidth={3} />
-      <text x={1705} y={880} fontSize={24} fontWeight={700} fill={C.ink} textAnchor="middle">플로팅도크</text>
-      <text x={1700} y={505} fontSize={26} fontWeight={700} fill={C.ink} textAnchor="middle">1Berth</text>
+      {/* ── 1BERTH ───────────────────────────────────────── */}
+      <rect x={1540} y={965} width={210} height={110} rx={12}
+            fill="#e7eff4" stroke="#4a4a4a" strokeWidth={2} />
+      <TextLabel x={1645} y={1030} t="1BERTH" size={19} weight={800} />
 
-      {/* ── 선석 코드 — 세이프티원 '위치' 칼럼과 대조하는 핵심 라벨 ── */}
-      {[
-        ['2Q-2', 120, 600], ['2Q-1', 330, 600], ['2D-1', 520, 600],
-        ['DH-2', 830, 470], ['DH-1', 830, 545],
-        ['1Q-2', 1000, 600], ['1Q-1', 1280, 600],
-        ['1D-1', 1620, 640], ['1D-2', 1620, 890],
-      ].map(([t, x, y]) => (
-        <text key={t as string} x={x as number} y={y as number}
-              fontSize={22} fontWeight={800} fill={C.code} textAnchor="middle">{t}</text>
-      ))}
+      {/* ── 플로팅 도크 ──────────────────────────────────── */}
+      <rect x={1820} y={880} width={185} height={185} rx={16}
+            fill="#dcdcdc" stroke={C.grayLn} strokeWidth={2} />
+      <TextLabel x={1912} y={980} t="플로팅도크" size={17} weight={700} />
 
-      {/* SEA */}
-      <text x={700} y={1000} fontSize={40} fontWeight={600} fill="#ffffff" opacity={0.75}
-            letterSpacing={8} textAnchor="middle">SEA</text>
-      <text x={1500} y={1000} fontSize={40} fontWeight={600} fill="#ffffff" opacity={0.75}
-            letterSpacing={8} textAnchor="middle">SEA</text>
+      {/* ── 라벨 ─────────────────────────────────────────── */}
+      {BAYS.map(([x, y, t], i) => <TextLabel key={i} x={x} y={y} t={t} size={13} weight={500} />)}
+      {PLACES.map(([x, y, t, s], i) => <TextLabel key={i} x={x} y={y} t={t} size={s ?? 14} weight={600} />)}
     </svg>
   );
 }

@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState, PointerEvent as ReactP
 import { collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, addDoc, query, orderBy, limit } from 'firebase/firestore';
 import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User } from 'firebase/auth';
 import { db, auth } from './firebase';
-import YardMap, { YARD_REGIONS, type YardRegion } from './components/YardMap';
+import YardMap, { YARD_REGIONS, YARD_HOME, YARD_W, YARD_H, type YardRegion } from './components/YardMap';
 
 enum OperationType {
   CREATE = 'create',
@@ -111,7 +111,13 @@ export default function App() {
   
   const containerRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
-  const didInitView = useRef(false);
+  // 첫 화면을 이미 맞춘 노드. 불리언 한 개로 두면 안 된다 — 로그인 직후 React 가
+  // 이 div 를 한 번 교체하는데, 그때 새 노드는 스크롤이 0 인 채로 남는다.
+  const initedNode = useRef<HTMLDivElement | null>(null);
+  /** 첫 화면의 배율. 지역 버튼이 이보다 더 축소되지 않도록 바닥으로 쓴다. */
+  const homeZoomRef = useRef(0.4);
+  /** 사용자가 지도를 한 번이라도 건드렸는가. 건드렸으면 첫 화면으로 되돌리지 않는다. */
+  const userMovedRef = useRef(false);
 
   // 지도는 2000x1400 이지만 야드는 위쪽 600 뿐이고 아래는 전부 바다다.
   // 스크롤 0,0 에서 시작하면 왼쪽 귀퉁이와 바다만 보이므로, 지도가 화면에
@@ -128,6 +134,7 @@ export default function App() {
     if (node) {
       const onWheel = (e: WheelEvent) => {
         e.preventDefault();                       // 기본 스크롤이 얹히지 않게
+        userMovedRef.current = true;
         const rect = node.getBoundingClientRect();
         const z1 = Math.min(3, Math.max(0.2, zoomRef.current + e.deltaY * -0.001));
         applyZoomAtRef.current?.(z1, e.clientX - rect.left, e.clientY - rect.top);
@@ -145,18 +152,19 @@ export default function App() {
         const my = (e.touches[0].clientY + e.touches[1].clientY) / 2 - rect.top;
         applyZoomAtRef.current?.(z1, mx, my);
       };
+      const onPointerDown = () => { userMovedRef.current = true; };
       node.addEventListener('wheel', onWheel, { passive: false });
       node.addEventListener('touchmove', onTouchMove, { passive: false });
+      node.addEventListener('pointerdown', onPointerDown, { passive: true });
       nativeCleanup.current = () => {
         node.removeEventListener('wheel', onWheel);
         node.removeEventListener('touchmove', onTouchMove);
+        node.removeEventListener('pointerdown', onPointerDown);
       };
     }
 
-    if (!node || didInitView.current) return;
+    if (!node || node === initedNode.current || userMovedRef.current) return;
 
-    const YARD_W = 2000, YARD_H = 600;
-    const DOCK_X = 750;   // 두 도크가 있는 야드의 작업 중심
     let tries = 0;
 
     // ref 가 붙는 순간에는 flex 레이아웃이 아직 안 잡혀 높이가 0 일 수 있다.
@@ -170,19 +178,30 @@ export default function App() {
         if (tries++ < 60) requestAnimationFrame(apply);
         return;
       }
-      didInitView.current = true;
-      // 가로로 논리 좌표 약 1400 폭이 들어오도록 잡는다. 세로가 아니라 가로를
-      // 기준으로 삼는 이유는, 야드가 가로로 길어서 세로에 맞추면 폭이 너무
-      // 좁게 잘리기 때문이다. 위아래 여백은 패널이 어차피 덮는다.
-      // 가로로 논리 좌표 약 1600 폭이 들어오게 잡아 야드 전체가 한눈에 보이게 한다.
-      // 세로가 남아도 뷰포트 배경이 바다와 같은 색이라 이음매가 보이지 않는다.
-      const z = Math.max(0.3, Math.min(0.9, vw / 1600));
+      initedNode.current = node;
+      // 야드 전체(2400x1200)가 아니라 배가 놓이는 띠에 맞춘다. 전체에 맞추면
+      // 세로로 긴 폰에서 배율이 0.2 까지 떨어져 호선번호를 읽을 수 없다.
+      // 아래 하한 0.34 도 같은 이유 — 그 밑으로는 글씨가 뭉개진다.
+      const H = YARD_HOME;
+      const fit = Math.max(0.34, Math.min(0.9, Math.min(vw / (H.w * 1.05), vh / (H.h * 1.05))));
+      // 세로로 긴 화면에서는 위 배율로도 지도가 화면보다 짧아 아래에 빈 바다 띠가
+      // 남는다. 지역 버튼과 '최근 업데이트' 바가 덮는 190px 만 남도록 배율을 올린다.
+      const OVERLAY_H = 190;
+      const z = Math.min(0.9, Math.max(fit, (vh - OVERLAY_H) / YARD_H));
       setZoom(z);
-      requestAnimationFrame(() => {
-        // 도크와 안벽이 있는 작업 구간(논리 y 150 부터)을 화면 위에 둔다.
-        node.scrollTop = Math.max(0, 150 * z);
-        node.scrollLeft = Math.max(0, DOCK_X * z - vw / 2);
-      });
+      zoomRef.current = z;
+      homeZoomRef.current = z;
+      // flyTo 와 같은 순서다: 래퍼 크기를 먼저 키워야 스크롤 목표가 옛 범위로
+      // 잘리지 않는다. React 의 리렌더를 기다리면 한 프레임 늦어 0 으로 남는다.
+      const wrap = node.firstElementChild as HTMLElement | null;
+      const inner = wrap?.firstElementChild as HTMLElement | null;
+      if (wrap && inner) {
+        wrap.style.width = `${YARD_W * z}px`;
+        wrap.style.height = `${YARD_H * z}px`;
+        inner.style.transform = `scale(${z})`;
+      }
+      node.scrollLeft = Math.max(0, (H.x + H.w / 2) * z - vw / 2);
+      node.scrollTop  = Math.max(0, (H.y + H.h / 2) * z - vh / 2);
     };
     requestAnimationFrame(apply);
   }, []);
@@ -210,8 +229,8 @@ export default function App() {
     if (!z0) return;
     const lx = (node.scrollLeft + ax) / z0;   // 고정하려는 지점의 논리 좌표
     const ly = (node.scrollTop + ay) / z0;
-    wrap.style.width = `${2000 * z1}px`;
-    wrap.style.height = `${1400 * z1}px`;
+    wrap.style.width = `${YARD_W * z1}px`;
+    wrap.style.height = `${YARD_H * z1}px`;
     inner.style.transform = `scale(${z1})`;
     node.scrollLeft = Math.max(0, lx * z1 - ax);
     node.scrollTop  = Math.max(0, ly * z1 - ay);
@@ -236,12 +255,16 @@ export default function App() {
     const PAD = 1.18;                                  // 구역 가장자리 여유
     // 꽉 채우면 답답해서 한 단계 물러난 배율로 착지한다.
     const FIT = 0.8;
-    const z1 = Math.max(0.3, Math.min(2.2, Math.min(vw / (r.w * PAD), vh / (r.h * PAD)) * FIT));
+    let z1 = Math.max(0.3, Math.min(2.2, Math.min(vw / (r.w * PAD), vh / (r.h * PAD)) * FIT));
+    // 안벽은 가로 700 이라 폰에서는 화면보다 넓다. 그대로 맞추면 '확대' 버튼을
+    // 눌렀는데 오히려 축소돼 버린다. '전체' 말고는 첫 화면보다 축소하지 않는다.
+    if (r.id !== 'all') z1 = Math.max(z1, homeZoomRef.current);
     const z0 = zoomRef.current;
     const sl0 = node.scrollLeft, st0 = node.scrollTop;
     const cx = r.x + r.w / 2, cy = r.y + r.h / 2;
 
     flyingRef.current = true;
+    userMovedRef.current = true;   // 지역 버튼으로 옮겼으면 첫 화면으로 되돌리지 않는다
     const prevTransition = inner.style.transition;
     inner.style.transition = 'none';                   // CSS 전환과 겹치지 않게
 
@@ -256,8 +279,8 @@ export default function App() {
       const z = z0 + (z1 - z0) * e;
 
       // 크기를 먼저 넓힌 뒤 스크롤해야 목표가 잘리지 않는다.
-      wrap.style.width = `${2000 * z}px`;
-      wrap.style.height = `${1400 * z}px`;
+      wrap.style.width = `${YARD_W * z}px`;
+      wrap.style.height = `${YARD_H * z}px`;
       inner.style.transform = `scale(${z})`;
       node.scrollLeft = Math.max(0, cx * z - vw / 2);
       node.scrollTop  = Math.max(0, cy * z - vh / 2);
@@ -378,10 +401,6 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (window.innerWidth < 768) {
-      setZoom(0.4);
-    }
-    
     // Check URL for admin mode or if in dev studio
     const params = new URLSearchParams(window.location.search);
     const isDev = window.location.hostname.includes('ais-dev') || window.location.hostname.includes('localhost');
@@ -674,8 +693,8 @@ export default function App() {
       return;
     }
 
-    let newX = Math.max(0, Math.min(2000, draggingRef.current.initialX + dx));
-    let newY = Math.max(0, Math.min(1400, draggingRef.current.initialY + dy));
+    let newX = Math.max(0, Math.min(YARD_W, draggingRef.current.initialX + dx));
+    let newY = Math.max(0, Math.min(YARD_H, draggingRef.current.initialY + dy));
 
     if (type === 'ship') {
       const SNAP_DIST = 60;
@@ -1134,12 +1153,12 @@ export default function App() {
       >
         <div 
           className={isPinching ? '' : 'transition-all duration-200 ease-out'}
-          style={{ width: 2000 * zoom, height: 1400 * zoom }}
+          style={{ width: YARD_W * zoom, height: YARD_H * zoom }}
         >
           <div 
             ref={containerRef}
-            className={`relative w-[2000px] h-[1400px] origin-top-left ${isPinching ? '' : 'transition-transform duration-300 ease-out'}`}
-            style={{ transform: `scale(${zoom})` }}
+            style={{ width: YARD_W, height: YARD_H, transform: `scale(${zoom})` }}
+            className={`relative origin-top-left ${isPinching ? '' : 'transition-transform duration-300 ease-out'}`}
             onClick={handleMapClick}
           >
             <YardMap />
