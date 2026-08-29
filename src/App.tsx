@@ -144,6 +144,18 @@ const DRAG_HOLD_MS = 600;
 /** 꾹 누르는 동안 이만큼(px) 움직이면 끌기가 아니라 지도 이동·핀치로 본다. */
 const DRAG_HOLD_SLOP = 8;
 
+/**
+ * 수집 주기(시간). `.github/workflows/sync-safetyone.yml` 의 크론과 같은 값이어야 한다.
+ * 여기를 고치면 아래 STALE 도 같이 따라간다 — 임계값을 두 군데 적지 않는다.
+ */
+const SYNC_PERIOD_H = 6;
+/**
+ * 심장박동이 이만큼(분) 없으면 빨갛게. 지켜야 하는 건 "몇 시간째 그대로" 와
+ * "수집이 죽음" 을 가르는 것이므로, 주기의 1.5배 = 한 번은 확실히 걸렀을 때만 빨갛다.
+ * 주기와 똑같이 잡으면 깃허브 크론이 몇 분만 밀려도 멀쩡한 수집이 빨갛게 뜬다.
+ */
+const SYNC_STALE_MIN = SYNC_PERIOD_H * 90;
+
 export default function App() {
   const [ships, setShips] = useState<Record<string, ShipData>>({});
   const [zones, setZones] = useState<Record<string, ZoneData>>({});
@@ -1340,12 +1352,12 @@ export default function App() {
           <div className="flex items-center gap-2">
             <h4 className="font-bold text-sm text-gray-800">최근 업데이트</h4>
             {lastSync !== null && (() => {
-              // "3시간째 그대로" 와 "수집이 죽음" 이 구분돼야 한다. 4시간 넘게
-              // 심장박동이 없으면 빨갛게 — 세이프티원 갱신 주기(2~3시간)보다 길다.
+              // "몇 시간째 그대로" 와 "수집이 죽음" 이 구분돼야 한다.
+              // 기준은 SYNC_STALE_MIN 한 곳에서만 정한다.
               const mins = Math.floor((Date.now() - lastSync) / 60000);
               const label = mins < 60 ? `${mins}분 전` : `${Math.floor(mins / 60)}시간 전`;
               return (
-                <span className={`text-[10px] px-1.5 py-0.5 rounded-full whitespace-nowrap ${mins > 240 ? 'bg-red-100 text-red-700' : 'bg-teal-50 text-teal-700'}`}>
+                <span className={`text-[10px] px-1.5 py-0.5 rounded-full whitespace-nowrap ${mins > SYNC_STALE_MIN ? 'bg-red-100 text-red-700' : 'bg-teal-50 text-teal-700'}`}>
                   3중점검 {label}
                 </span>
               );
