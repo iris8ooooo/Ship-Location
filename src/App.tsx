@@ -192,8 +192,22 @@ export default function App() {
   /** 지도 회전. 0 은 도면 그대로(가로로 김), 90/270 은 세워서 세로 화면을 채운다.
    *  좌표계는 건드리지 않는다 — 컨테이너 transform 만 돌리므로 저장된 호선 좌표는 그대로다. */
   const [rot, setRot] = useState<YardRot>(() => {
-    const saved = Number(localStorage.getItem('yardRot'));
-    return (YARD_ROTS as number[]).includes(saved) ? saved as YardRot : 0;
+    // ★raw 를 먼저 본다. Number(null) 은 0 이라 저장값이 없어도 "0도가 저장돼 있다" 로
+    //  읽히고, 아래 기본값에 영영 닿지 못한다.
+    const raw = localStorage.getItem('yardRot');
+    const saved = Number(raw);
+    if (raw !== null && (YARD_ROTS as number[]).includes(saved)) return saved as YardRot;
+    // ★처음 열 때는 **더 크게 보이는 방향**으로 시작한다 (2026-08-29 사용자 지시).
+    //  야드는 가로로 길어(1480x840) 세로 폰에 눕힌 채로 전체를 맞추면 배율이
+    //  0.28 밖에 안 되고 지도가 화면의 30% 만 채운다 — 나머지는 빈 바다다
+    //  (실측 iPhone14 33% · 갤S20 32% · 폴드커버 27%). 90도 세우면 0.49 로 꽉 찬다.
+    //  ★"폭 640 미만이면 세운다" 같은 임계값을 두지 않는다. 그건 아이패드 미니
+    //   (744 세로)를 놓친다 — 거기도 눕히면 39% 뿐이다. 두 방향을 실제로 재서
+    //   배율이 큰 쪽을 고르면 기기 목록을 관리할 필요가 없다.
+    //  회전 버튼은 그대로 있으니 언제든 되돌릴 수 있고, 고른 방향은 저장돼 다음부터 그대로다.
+    if (typeof window === 'undefined') return 0;
+    const w = window.innerWidth, h = window.innerHeight;
+    return fullFit(w, h, 90) > fullFit(w, h, 0) ? 90 : 0;
   });
   const rotRef = useRef<YardRot>(rot);
   // 첫 화면을 이미 맞춘 노드. 불리언 한 개로 두면 안 된다 — 로그인 직후 React 가
@@ -1292,7 +1306,7 @@ export default function App() {
               className="m-0 text-base font-bold text-gray-800 flex items-center gap-2 cursor-pointer select-none flex-wrap"
               onClick={handleTitleTap}
             >
-              <span>HD현대삼호 SHIP LOCATION</span>
+              <span>이 배가 아닌가벼_HSGINS</span>
               {isAdminUrl && (
                 <span className={`text-xs px-2 py-0.5 rounded text-white whitespace-nowrap ${appMode === 'admin' ? 'bg-blue-600' : 'bg-emerald-600'}`}>
                   {appMode === 'admin' ? '관리자' : '뷰어'}
