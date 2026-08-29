@@ -36,14 +36,26 @@ jobs:
       - name: Fetch index.html and the hashed assets it references
         run: |
           set -x
-          echo "=== index.html (gzip 요청) ==="
-          curl -sS -D - -o /tmp/index.html -H 'Accept-Encoding: gzip, br' \
-            -w '\n[timing] dns=%{time_namelookup} conn=%{time_connect} tls=%{time_appconnect} ttfb=%{time_starttransfer} total=%{time_total} http=%{http_version} size=%{size_download}\n' \
+          echo "=== index.html (gzip 요청) — 헤더와 wire 크기 ==="
+          curl -sS -D - -o /dev/null -H 'Accept-Encoding: gzip, br' \
+            -w '\n[timing] dns=%{time_namelookup} conn=%{time_connect} tls=%{time_appconnect} ttfb=%{time_starttransfer} total=%{time_total} http=%{http_version} wire_bytes=%{size_download}\n' \
             "$URL/"
+
+          # ★파싱용으로는 --compressed 로 따로 받는다. 위 요청은 **압축된 바이트**를 주므로
+          #  그걸 저장해 grep 하면 /assets/ 경로를 못 찾는다 — 실제로 그렇게 깨졌다
+          #  (gzip_min_length 를 256 으로 낮추자 index.html 도 압축 대상이 되면서 드러났다).
+          curl -sS --compressed -o /tmp/index.html "$URL/"
           echo "=== index.html 본문 ==="
           cat /tmp/index.html
 
-          for A in $(grep -o '/assets/[A-Za-z0-9._-]*' /tmp/index.html | sort -u); do
+          ASSETS=$(grep -o '/assets/[A-Za-z0-9._-]*' /tmp/index.html | sort -u)
+          # 에셋을 하나도 못 찾으면 조용히 넘어가지 말 것 — 그게 이번에 실제로 일어난 일이고,
+          # 초록불만 보고 "압축이 잘 되고 있구나" 로 읽을 뻔했다.
+          if [ -z "$ASSETS" ]; then
+            echo "::error::index.html 에서 /assets/ 를 하나도 못 찾았다 — 프로브가 깨진 것이다."
+            exit 1
+          fi
+          for A in $ASSETS; do
             echo "=== $A (gzip+br 요청) ==="
             curl -sS -D - -o /tmp/asset.bin -H 'Accept-Encoding: gzip, br' \
               -w '\n[timing] ttfb=%{time_starttransfer} total=%{time_total} http=%{http_version} wire_bytes=%{size_download}\n' \
