@@ -12,9 +12,14 @@
  *  - 추출: 행 단위로 8xxx 호선번호 + 선석 이름이 같이 있는 줄을 잡는다
  *    (docs/safetyone-capture.js, src/lib/safetyone-match.mjs 와 같은 기준).
  *
- * ★실패하면 out/ 에 page.html 과 shot.png 을 남기고 1 로 죽는다.
- *   액션이 그걸 아티팩트로 올리므로, 다음 세션이 사용자 없이
- *   실제 화면을 보고 셀렉터를 고칠 수 있다 — 사이트 개편은 예정된 일이다.
+ * ★실패하면 out/skeleton.json 을 남기고 1 로 죽는다. 다음 세션이 사용자 없이
+ *   셀렉터를 고칠 수 있게 하는 것이 목적이다 — 사이트 개편은 예정된 일이다.
+ *
+ *   ★단 **글자는 절대 담지 않는다.** 이 레포는 공개고 액션 아티팩트도 공개로
+ *   내려받힌다. 사내 시스템의 화면·HTML 을 그대로 올리면 그게 곧 유출이다.
+ *   그래서 담는 건 구조뿐이다: 태그·id·class·속성 이름·자식 수·글자 "길이",
+ *   그리고 호선번호/선석 정규식이 **몇 개** 맞았는지. 셀렉터를 고치기엔 충분하고
+ *   내용은 새어 나가지 않는다.
  */
 import { chromium } from 'playwright';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -33,13 +38,60 @@ const browser = await chromium.launch(
   process.env.PW_EXECUTABLE_PATH ? { executablePath: process.env.PW_EXECUTABLE_PATH } : {});
 const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
 
-/** 죽기 전에 현장 보존 — 다음 세션이 이걸 보고 고친다. */
+/**
+ * 죽기 전에 화면 "구조" 만 남긴다 — 글자는 담지 않는다(공개 아티팩트라서).
+ * 다음 세션이 이 뼈대를 보고 셀렉터를 고친다.
+ */
 async function bail(reason) {
   console.error(`실패: ${reason}`);
   try {
-    writeFileSync(`${dirname(outPath)}/page.html`, await page.content());
-    await page.screenshot({ path: `${dirname(outPath)}/shot.png`, fullPage: true });
-    console.error(`현장 보존: ${dirname(outPath)}/page.html, shot.png`);
+    const skeleton = await page.evaluate(() => {
+      const HULL = /\b8\d{3}\b/;
+      const BERTH = /(1도크|2도크|1안벽|2안벽|1돌핀|2돌핀|플로팅|1BERTH|시운전|출항|해상)/;
+      const node = (el) => ({
+        tag: el.tagName,
+        id: el.id || undefined,
+        cls: (el.className && typeof el.className === 'string')
+          ? el.className.split(/\s+/).filter(Boolean).slice(0, 6) : undefined,
+        attrs: el.getAttributeNames().filter(a => a !== 'class' && a !== 'id').slice(0, 8),
+        kids: el.children.length,
+        textLen: (el.textContent || '').trim().length,      // 길이만, 내용은 없다
+      });
+      const count = (sel) => document.querySelectorAll(sel).length;
+      // 호선번호·선석이 글자로 존재하기는 하는지 "개수" 로만 확인한다.
+      let hullish = 0, berthish = 0, both = 0;
+      for (const el of document.querySelectorAll('tr, [role="row"], li')) {
+        const t = el.innerText || '';
+        const h = HULL.test(t), b = BERTH.test(t);
+        if (h) hullish++;
+        if (b) berthish++;
+        if (h && b) both++;
+      }
+      return {
+        url: location.origin + location.pathname,          // 쿼리·해시는 뺀다
+        title꼴: (document.title || '').length,
+        // ★"호선번호꼴행은 잡히는데 선석꼴행이 0" 이면 십중팔구 인코딩이다.
+        //  숫자는 어떤 인코딩에서도 살아남고 한글만 깨지기 때문이다(실측으로 재현했다).
+        //  그 경우 charset 을 먼저 본다 — 사내 시스템은 EUC-KR 인 경우가 흔하다.
+        charset: document.characterSet,
+        counts: {
+          form: count('form'), input: count('input'),
+          inputPassword: count('input[type="password"]'),
+          inputText: count('input[type="text"], input[type="email"], input:not([type])'),
+          button: count('button'), table: count('table'), tr: count('tr'),
+          roleRow: count('[role="row"]'), li: count('li'), canvas: count('canvas'),
+          iframe: count('iframe'),
+        },
+        매칭: { 호선번호꼴행: hullish, 선석꼴행: berthish, 둘다: both },
+        // 표처럼 생긴 컨테이너의 뼈대만 (최대 30개)
+        rows: [...document.querySelectorAll('table, [role="table"], [role="grid"], ul, tbody')]
+          .slice(0, 30).map(node),
+        landmarks: [...document.querySelectorAll('main, nav, header, section, [role="tablist"], [role="tab"]')]
+          .slice(0, 30).map(node),
+      };
+    });
+    writeFileSync(`${dirname(outPath)}/skeleton.json`, JSON.stringify({ reason, skeleton }, null, 1));
+    console.error(`구조만 보존: ${dirname(outPath)}/skeleton.json (글자는 담지 않았다)`);
   } catch { /* 보존도 실패 — 어쩔 수 없다 */ }
   await browser.close();
   process.exit(1);
