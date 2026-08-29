@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState, PointerEvent as ReactP
 import { collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, addDoc, query, orderBy, limit } from 'firebase/firestore';
 import { parseListText, planMoves, BERTH_LABEL } from './lib/safetyone-match.mjs';
 import { fetchVesselPlan, dateLabel, type VesselPlan } from './lib/vessel-plan';
+import { fetchRoster, specIsDF, OPEN_ROSTER, type Roster } from './lib/vessel-roster';
 import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User } from 'firebase/auth';
 import { db, auth } from './firebase';
 import YardMap, { YARD_REGIONS, YARD_HOME, YARD_W, YARD_H, YARD_ROTS,
@@ -90,17 +91,23 @@ interface TideInfo {
  * 호선번호 라벨의 회전각(선체 기준).
  *
  * 글자는 반드시 선체 긴 방향을 따라가야 한다 — 선체 폭이 26px 뿐이라 가로로 두면
- * 밖으로 삐져나간다. 그래서 선택지는 -90 과 +90 둘뿐이고, 둘 중 화면에서
- * 뒤집혀 보이지 않는 쪽을 고른다. 지도를 270도로 세웠을 때 이 선택을 안 하면
- * 절반이 거꾸로 선다(실측).
+ * 밖으로 삐져나간다. 그래서 선택지는 -90 과 +90 둘뿐이고, 어느 쪽을 고르느냐가
+ * 화면에서 글자가 어느 방향으로 읽히느냐를 정한다.
+ *
+ * 규칙 두 개 (2026-08-29 사용자 확인):
+ *   1. 가로로 눕는 쪽이 있으면 그쪽 — 가로 글씨가 제일 읽기 쉽다.
+ *   2. 어차피 세로면 **첫 숫자가 위**로 간다. 화면 기준 +90 이 그 방향이다
+ *      (실측: rotate(90deg) 는 위→아래로 읽히고, -90 은 아래→위로 읽힌다).
+ *      회전을 어느 방향으로 돌리든 이 규칙은 같다.
  */
 function hullLabelRot(shipR: number, rot: number) {
   const norm = (a: number) => (((a % 360) + 540) % 360) - 180;   // (-180, 180]
   const a = shipR + rot;                    // 선체의 화면상 각도
-  if (Math.abs(norm(a - 90)) < 90) return -90;
-  if (Math.abs(norm(a + 90)) < 90) return 90;
-  // 어느 쪽이든 세로다. 아래에서 위로 읽히는 -90 쪽으로 맞춘다.
-  return norm(a - 90) === -90 ? -90 : 90;
+  // 1. 화면에서 가로(0도)로 눕는 쪽이 있으면 그쪽.
+  if (norm(a - 90) === 0) return -90;
+  if (norm(a + 90) === 0) return 90;
+  // 2. 세로다 — 화면각이 +90(첫 숫자 위)이 되는 쪽을 고른다.
+  return norm(a + 90) === 90 ? 90 : -90;
 }
 
 const DRAG_HOLD_MS = 600;
@@ -122,7 +129,9 @@ export default function App() {
   const [lastSync, setLastSync] = useState<number | null>(null);
   /** 뷰어 카드에 보여줄 "그 호선의 오늘"(공정관리 Supabase). 'loading'/'error' 구분. */
   const [vesselPlan, setVesselPlan] = useState<VesselPlan | 'loading' | 'error' | null>(null);
-  const [newShipColor, setNewShipColor] = useState('yellow');
+  /** 공정관리에서 읽은 호선 명부 — 작업 호선(진하게) · DF 호선(초록).
+   *  조회 실패 시 OPEN_ROSTER 라 아무것도 흐려지지 않는다(fail open). */
+  const [roster, setRoster] = useState<Roster>(OPEN_ROSTER);
   const [zoom, setZoom] = useState(1);
   const [appMode, setAppMode] = useState<'admin' | 'viewer'>('viewer');
   const [isAdminUrl, setIsAdminUrl] = useState(false);
@@ -616,6 +625,14 @@ export default function App() {
     return () => { stop = true; };
   }, [flyTo]);
 
+  // 호선 명부(작업 호선 · DF)를 한 번 읽어 둔다. 실패하면 OPEN_ROSTER 그대로 —
+  // 전부 진하게 보이는, 지금까지와 똑같은 화면이 된다.
+  useEffect(() => {
+    let alive = true;
+    fetchRoster().then(r => { if (alive && r) setRoster(r); });
+    return () => { alive = false; };
+  }, []);
+
   // 뷰어 카드용 공정·할일 조회. 탭할 때마다가 아니라 선택이 바뀔 때 한 번(모듈에 5분 캐시).
   useEffect(() => {
     if (appMode === 'admin' || !selectedShipId) { setVesselPlan(null); return; }
@@ -796,7 +813,8 @@ export default function App() {
     const name = newShipName.trim();
     if (name) {
       try {
-        await setDoc(doc(db, 'ships', name), { x: 1000, y: 750, r: 0, color: newShipColor });
+        // 색은 고르지 않는다 — DF 여부를 공정관리 명부가 정한다. yellow 는 저장용 기본값.
+        await setDoc(doc(db, 'ships', name), { x: 1000, y: 750, r: 0, color: 'yellow' });
         logAction('배치', name);
         setNewShipName('');
       } catch (error) {
@@ -1424,14 +1442,7 @@ export default function App() {
       {/* Add Ship Panel */}
       {appMode === 'admin' && openPanel === 'add' && (
         <div className="bg-white/95 backdrop-blur p-3 rounded-2xl shadow-xl grid grid-cols-2 md:grid-cols-1 gap-2 items-center">
-          <select 
-            value={newShipColor} 
-            onChange={e => setNewShipColor(e.target.value)}
-            className="p-2 text-sm border border-gray-300 rounded bg-white text-gray-800 w-full min-w-0 lg:w-auto"
-          >
-            <option value="yellow">노란색</option>
-            <option value="green">초록색</option>
-          </select>
+          {/* 색 선택 없앴다(2026-08-29) — DF 초록/LNGC 노랑은 공정관리 명부가 정한다. */}
           <input 
             type="text" 
             value={newShipName}
@@ -1702,7 +1713,12 @@ export default function App() {
           {Object.keys(ships).map((id) => {
             const ship = ships[id];
             const isSelected = selectedShipId === id;
-            const isGreen = ship.color === 'green';
+            // DF 호선은 초록. 공정관리 명부가 정하고, 명부에 없으면 세이프티원이
+            // 같이 적어 준 선종("15500 CNTR(LNG DF)")으로 보조 판정한다.
+            const isGreen = roster.df.has(id) || specIsDF((ship as any).spec);
+            // 공정일정에 없는 배 = 우리가 안 붙는 배. 물러나게 한다.
+            // 명부를 못 읽었으면 working 이 비어 있고, 그때는 아무도 안 흐려진다.
+            const isDim = roster.working.size > 0 && !roster.working.has(id);
             
             return (
               <div
@@ -1710,11 +1726,13 @@ export default function App() {
                 key={id}
                 className={`absolute w-[26px] h-[130px] select-none touch-none transition-transform duration-300
                   ${appMode === 'admin' ? 'cursor-grab active:cursor-grabbing active:z-[999]' : 'cursor-pointer'}
-                  ${isSelected && appMode === 'admin' ? 'z-[100]' : 'z-10'}
+                  ${isSelected && appMode === 'admin' ? 'z-[100]' : isDim ? 'z-[5]' : 'z-10'}
                 `}
                 style={{
                   left: ship.x,
                   top: ship.y,
+                  // 흐린 배는 우리 호선 아래로 깔린다(z-5) — 겹칠 때 우리 배가 위.
+                  opacity: isDim && !isSelected ? 0.28 : 1,
                   transform: `translate(-50%, -50%) rotate(${ship.r}deg)`
                 }}
                 onPointerDown={appMode === 'admin' ? (e) => onPointerDown(e, id, 'ship') : undefined}
