@@ -8,6 +8,16 @@
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <link rel="apple-touch-icon" href="/icon.svg" />
     <link rel="manifest" href="/manifest.json" />
+    <!-- 메모 글꼴. 원래 src/index.css 첫 줄의 @import 였는데, 그러면 빌드된 CSS 의
+         첫 바이트가 되어 **렌더차단 스타일시트 안의 @import** 가 된다. 그게 해소될
+         때까지 module script 가 실행되지 않아 하루 첫 실행이 ~100ms 늦었다.
+         media="print" 로 받아 두고 onload 에서 all 로 올리면 차단하지 않는다.
+         .font-memo 는 App.tsx 의 메모 말풍선·입력창 두 곳뿐이라 FOUT 비용이 거의 없다. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gowun+Dodum&display=swap"
+          media="print" onload="this.media='all'" />
+    <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gowun+Dodum&display=swap" /></noscript>
     <title>HD현대삼호 SHIP LOCATION</title>
   </head>
   <body>
