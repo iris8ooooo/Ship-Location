@@ -28,6 +28,8 @@ export const YARD_HOME = { x: 0, y: 0, w: 1380, h: 840 };
 export interface YardRegion {
   id: string; label: string;
   x: number; y: number; w: number; h: number;
+  /** 착지 배율 배수. 클수록 더 확대된다. 없으면 0.8. */
+  fit?: number;
 }
 
 /**
@@ -36,12 +38,12 @@ export interface YardRegion {
  * 세이프티원 도면에는 '안벽' 이라고만 적혀 있어 1/2 구분은 사내 명칭을 따랐다.
  */
 export const YARD_REGIONS: YardRegion[] = [
-  { id: 'dock2',    label: '2도크',  x: 325, y: 225, w: 95,  h: 335 },
-  { id: 'dock1',    label: '1도크',  x: 405, y: 255, w: 90,  h: 305 },
-  { id: 'quay2',    label: '2안벽',  x: 20,  y: 470, w: 620, h: 150 },
-  { id: 'quay1',    label: '1안벽',  x: 640, y: 490, w: 650, h: 150 },
-  { id: 'dolphin2', label: '2돌핀',  x: 80,  y: 530, w: 165, h: 250 },
-  { id: 'dolphin1', label: '1돌핀',  x: 570, y: 535, w: 165, h: 250 },
+  { id: 'dock2',    label: '2도크',  x: 325, y: 225, w: 95,  h: 335, fit: 0.68 },
+  { id: 'dock1',    label: '1도크',  x: 405, y: 255, w: 90,  h: 305, fit: 0.68 },
+  { id: 'quay2',    label: '2안벽',  x: 20,  y: 470, w: 620, h: 150, fit: 1.15 },
+  { id: 'quay1',    label: '1안벽',  x: 640, y: 490, w: 650, h: 150, fit: 1.15 },
+  { id: 'dolphin2', label: '2돌핀',  x: 80,  y: 530, w: 165, h: 250, fit: 0.68 },
+  { id: 'dolphin1', label: '1돌핀',  x: 570, y: 535, w: 165, h: 250, fit: 0.68 },
   { id: 'floating', label: '플로팅', x: 890, y: 550, w: 150, h: 180 },
   { id: 'berth1',   label: '1BERTH', x: 890, y: 295, w: 150, h: 260 },
   { id: 'all',      label: '전체',   x: 0,   y: 0,   w: 1380, h: 840 },

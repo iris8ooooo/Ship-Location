@@ -179,13 +179,12 @@ export default function App() {
         return;
       }
       initedNode.current = node;
-      // 야드 전체(2400x1200)가 아니라 배가 놓이는 띠에 맞춘다. 전체에 맞추면
-      // 세로로 긴 폰에서 배율이 0.2 까지 떨어져 호선번호를 읽을 수 없다.
-      // 아래 하한 0.34 도 같은 이유 — 그 밑으로는 글씨가 뭉개진다.
-      const H = YARD_HOME;
-      const fit = Math.max(0.34, Math.min(0.9, Math.min(vw / (H.w * 1.05), vh / (H.h * 1.05))));
+      // 야드 전체가 가로로 들어오게 맞춘다. 폭이 좁을수록 배율이 낮아지지만,
+      // 어느 호선이 어디 있는지 한눈에 보는 게 먼저고 자세히는 지역 버튼으로 간다.
+      // 하한 0.24 는 가장 좁은 기기(폴드 커버 344px)에서도 야드가 다 들어오는 값.
       // 지도가 화면보다 짧아 남는 여백은 뷰포트 배경(바다색)이 그대로 이어받는다.
-      const z = Math.min(0.9, Math.max(0.28, fit));
+      const H = YARD_HOME;
+      const z = Math.min(0.9, Math.max(0.24, Math.min(vw / (H.w * 1.05), vh / (H.h * 1.05))));
       setZoom(z);
       zoomRef.current = z;
       homeZoomRef.current = z;
@@ -251,8 +250,9 @@ export default function App() {
 
     const vw = node.clientWidth, vh = node.clientHeight;
     const PAD = 1.18;                                  // 구역 가장자리 여유
-    // 꽉 채우면 답답해서 한 단계 물러난 배율로 착지한다.
-    const FIT = 0.8;
+    // 구역마다 적당한 배율이 다르다. 도크·돌핀은 꽉 채우면 답답하고,
+    // 안벽은 가로로 길어 여유를 두면 전체보기와 구분이 안 된다. (YardMap 의 fit)
+    const FIT = r.fit ?? 0.8;
     let z1 = Math.max(0.3, Math.min(2.2, Math.min(vw / (r.w * PAD), vh / (r.h * PAD)) * FIT));
     // 안벽은 가로 700 이라 폰에서는 화면보다 넓다. 그대로 맞추면 '확대' 버튼을
     // 눌렀는데 오히려 축소돼 버린다. '전체' 말고는 첫 화면보다 축소하지 않는다.
@@ -1118,14 +1118,14 @@ export default function App() {
           2단으로 쌓아 가로 폭을 줄이고, 최근 업데이트 바에 바짝 붙인다. */}
       <div
         style={{ bottom: 'calc(3rem + env(safe-area-inset-bottom))' }}
-        className="fixed left-0 right-0 z-40 px-2 pb-1 overflow-x-auto"
+        className="fixed left-0 right-0 z-40 px-2 overflow-x-auto"
       >
-        <div className="grid grid-rows-2 grid-flow-col gap-1.5 w-max mx-auto">
+        <div className="grid grid-rows-2 grid-flow-col gap-1 w-max mx-auto pb-0.5">
           {YARD_REGIONS.map(r => (
             <button
               key={r.id}
               onClick={() => flyTo(r)}
-              className="px-4 h-9 shrink-0 rounded-full bg-white/95 backdrop-blur text-gray-800 text-sm font-bold shadow-lg border border-gray-200 active:scale-95 active:bg-blue-50 transition-all"
+              className="px-2.5 h-8 text-xs sm:px-4 sm:h-9 sm:text-sm shrink-0 rounded-full bg-white/95 backdrop-blur text-gray-800 font-bold shadow-lg border border-gray-200 active:scale-95 active:bg-blue-50 transition-all"
             >
               {r.label}
             </button>
@@ -1239,7 +1239,6 @@ export default function App() {
                     ${appMode === 'admin' ? 'active:scale-105 active:shadow-[10px_10px_25px_rgba(0,0,0,0.7)]' : ''}
                     ${isGreen ? 'bg-green-500' : 'bg-yellow-400'}
                     ${isSelected && appMode === 'admin' ? 'ring-4 ring-blue-500 ring-offset-2 shadow-[0_0_20px_rgba(59,130,246,0.6)]' : 'shadow-[5px_5px_15px_rgba(0,0,0,0.5)]'}
-                    ${!isShipDocked(ship) ? 'animate-ship-bob' : ''}
                   `}
                 >
                   {/* Ship Details - Deck / Cargo Area */}
@@ -1253,26 +1252,9 @@ export default function App() {
                 {/* Ship Details - Bow mark */}
                 <div className="absolute top-1 w-[7px] h-[7px] border-t-2 border-black/20 rounded-full pointer-events-none"></div>
 
-                {/* Sailing Animation (Wake & Propeller) */}
-                {!isShipDocked(ship) && (
-                  <>
-                    {/* Bow Wave */}
-                    <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[24px] h-[12px] pointer-events-none overflow-visible z-[-1]">
-                      <div className="bow-wave"></div>
-                      <div className="bow-wave delay-1"></div>
-                    </div>
-                    
-                    {/* Stern Wake & Propeller */}
-                    <div className="propeller-spin z-0"></div>
-                    <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-[24px] h-[36px] pointer-events-none overflow-visible z-[-1]">
-                      <div className="wake-v-shape"></div>
-                      <div className="wake-v-shape delay-1"></div>
-                      <div className="wake-particle"></div>
-                      <div className="wake-particle delay-1"></div>
-                      <div className="wake-particle delay-2"></div>
-                    </div>
-                  </>
-                )}
+                {/* 배 모션은 전부 뺐다. 3중점검에서 가져온 자리에 정박해 있는
+                    것이지 움직이는 중이 아니고, 25척이 각자 60fps 로 애니메이션을
+                    돌리면 계속 리페인트가 일어나 폰이 뜨거워진다. */}
 
                 {/* 호선번호. 세로로 선 배는 글자를 한 자씩 쌓지 않고 라벨 자체를
                     90도 눕혀 선체 방향으로 한 줄에 읽히게 한다 (세이프티원과 동일한 방식). */}
