@@ -1,0 +1,43 @@
+name: Deploy Firestore rules
+
+# firestore.rules 를 프로덕션 데이터베이스에 배포한다.
+# Cloud Run 배포와 같은 WIF 인증을 그대로 쓴다. 대상 DB 는 firebase.json 에 있다.
+
+on:
+  push:
+    branches: [main]
+    paths: [firestore.rules, firebase.json]
+  workflow_dispatch:
+
+jobs:
+  rules:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check that GCP secrets are configured
+        id: precheck
+        run: |
+          if [ -z "${{ secrets.GCP_PROJECT_ID }}" ] \
+          || [ -z "${{ secrets.GCP_WIF_PROVIDER }}" ] \
+          || [ -z "${{ secrets.GCP_SERVICE_ACCOUNT }}" ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::GCP secrets not set - skipping."
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Authenticate to Google Cloud
+        if: steps.precheck.outputs.ready == 'true'
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Deploy rules
+        if: steps.precheck.outputs.ready == 'true'
+        run: npx firebase-tools@13 deploy --only firestore:rules --project "${{ secrets.GCP_PROJECT_ID }}" --non-interactive
