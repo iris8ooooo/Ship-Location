@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState, PointerEvent as ReactP
 import { collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, addDoc, query, orderBy, limit } from 'firebase/firestore';
 import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User } from 'firebase/auth';
 import { db, auth } from './firebase';
-import YardMap, { YARD_REGIONS, YARD_HOME, YARD_W, YARD_H, type YardRegion } from './components/YardMap';
+import YardMap, { YARD_REGIONS, YARD_HOME, YARD_W, YARD_H, YARD_PAD_L, type YardRegion } from './components/YardMap';
 
 enum OperationType {
   CREATE = 'create',
@@ -77,6 +77,14 @@ interface TideInfo {
   tides: { type: 'High' | 'Low'; time: string; height: number }[];
   status: string;
 }
+
+/** 터치로 배를 끌기 전에 눌러야 하는 시간(ms).
+ *  두 손가락으로 줌아웃할 때 한 손가락이 배에 닿으면 배가 딸려가던 문제 때문에 넣었다.
+ *  1초는 배를 여러 척 옮길 때 답답하고, 300ms 대는 핀치가 시작되는 구간과 겹친다.
+ *  600ms 면 실수로 눌릴 일은 없으면서 "꾹" 한 번으로 잡힌다. */
+const DRAG_HOLD_MS = 600;
+/** 꾹 누르는 동안 이만큼(px) 움직이면 끌기가 아니라 지도 이동·핀치로 본다. */
+const DRAG_HOLD_SLOP = 8;
 
 export default function App() {
   const [ships, setShips] = useState<Record<string, ShipData>>({});
@@ -181,10 +189,13 @@ export default function App() {
       initedNode.current = node;
       // 야드 전체가 가로로 들어오게 맞춘다. 폭이 좁을수록 배율이 낮아지지만,
       // 어느 호선이 어디 있는지 한눈에 보는 게 먼저고 자세히는 지역 버튼으로 간다.
-      // 하한 0.24 는 가장 좁은 기기(폴드 커버 344px)에서도 야드가 다 들어오는 값.
+      // 왼쪽 여백(YARD_PAD_L)까지 같이 넣어야 축소했을 때 여백이 보인다. 빼면
+      // 여백이 화면 밖으로 밀려나 덧댄 의미가 없어진다.
+      // 하한 0.22 는 가장 좁은 기기(폴드 커버 344px)에서도 다 들어오는 값 —
+      // 여백만큼 좌표 폭이 넓어졌으니 예전 0.24 에서 같은 비율로 내렸다.
       // 지도가 화면보다 짧아 남는 여백은 뷰포트 배경(바다색)이 그대로 이어받는다.
       const H = YARD_HOME;
-      const z = Math.min(0.9, Math.max(0.24, Math.min(vw / (H.w * 1.05), vh / (H.h * 1.05))));
+      const z = Math.min(0.9, Math.max(0.22, Math.min(vw / ((H.w + YARD_PAD_L) * 1.05), vh / (H.h * 1.05))));
       setZoom(z);
       zoomRef.current = z;
       homeZoomRef.current = z;
@@ -193,11 +204,12 @@ export default function App() {
       const wrap = node.firstElementChild as HTMLElement | null;
       const inner = wrap?.firstElementChild as HTMLElement | null;
       if (wrap && inner) {
-        wrap.style.width = `${YARD_W * z}px`;
+        wrap.style.width = `${(YARD_W + YARD_PAD_L) * z}px`;
         wrap.style.height = `${YARD_H * z}px`;
+        inner.style.marginLeft = `${YARD_PAD_L * z}px`;
         inner.style.transform = `scale(${z})`;
       }
-      node.scrollLeft = Math.max(0, (H.x + H.w / 2) * z - vw / 2);
+      node.scrollLeft = Math.max(0, (H.x + H.w / 2 + YARD_PAD_L) * z - vw / 2);
       node.scrollTop  = Math.max(0, (H.y + H.h / 2) * z - vh / 2);
     };
     requestAnimationFrame(apply);
@@ -226,8 +238,9 @@ export default function App() {
     if (!z0) return;
     const lx = (node.scrollLeft + ax) / z0;   // 고정하려는 지점의 논리 좌표
     const ly = (node.scrollTop + ay) / z0;
-    wrap.style.width = `${YARD_W * z1}px`;
+    wrap.style.width = `${(YARD_W + YARD_PAD_L) * z1}px`;
     wrap.style.height = `${YARD_H * z1}px`;
+    inner.style.marginLeft = `${YARD_PAD_L * z1}px`;
     inner.style.transform = `scale(${z1})`;
     node.scrollLeft = Math.max(0, lx * z1 - ax);
     node.scrollTop  = Math.max(0, ly * z1 - ay);
@@ -253,8 +266,11 @@ export default function App() {
     // 구역마다 적당한 배율이 다르다. 도크·돌핀은 꽉 채우면 답답하고,
     // 안벽은 가로로 길어 여유를 두면 전체보기와 구분이 안 된다. (YardMap 의 fit)
     const FIT = r.fit ?? 0.8;
-    let z1 = Math.max(0.3, Math.min(2.2, Math.min(vw / (r.w * PAD), vh / (r.h * PAD)) * FIT));
-    // 안벽은 가로 700 이라 폰에서는 화면보다 넓다. 그대로 맞추면 '확대' 버튼을
+    // 하한 0.3 을 그대로 두면 '전체' 가 첫 화면(0.25)보다 확대돼 왼쪽 끝이 잘린다.
+    // 첫 화면보다 더 축소할 일은 없으니 하한은 첫 화면 배율을 넘지 않게 잡는다.
+    const FLOOR = Math.min(0.3, homeZoomRef.current);
+    let z1 = Math.max(FLOOR, Math.min(2.2, Math.min(vw / (r.w * PAD), vh / (r.h * PAD)) * FIT));
+    // 안벽은 가로로 길어 폰에서는 화면보다 넓다. 그대로 맞추면 '확대' 버튼을
     // 눌렀는데 오히려 축소돼 버린다. '전체' 말고는 첫 화면보다 축소하지 않는다.
     if (r.id !== 'all') z1 = Math.max(z1, homeZoomRef.current);
     const z0 = zoomRef.current;
@@ -277,10 +293,11 @@ export default function App() {
       const z = z0 + (z1 - z0) * e;
 
       // 크기를 먼저 넓힌 뒤 스크롤해야 목표가 잘리지 않는다.
-      wrap.style.width = `${YARD_W * z}px`;
+      wrap.style.width = `${(YARD_W + YARD_PAD_L) * z}px`;
       wrap.style.height = `${YARD_H * z}px`;
+      inner.style.marginLeft = `${YARD_PAD_L * z}px`;
       inner.style.transform = `scale(${z})`;
-      node.scrollLeft = Math.max(0, cx * z - vw / 2);
+      node.scrollLeft = Math.max(0, (cx + YARD_PAD_L) * z - vw / 2);
       node.scrollTop  = Math.max(0, cy * z - vh / 2);
 
       if (p < 1) { requestAnimationFrame(step); return; }
@@ -471,6 +488,23 @@ export default function App() {
   };
 
   const draggingRef = useRef<{ type: 'ship' | 'zone', id: string, startX: number, startY: number, initialX: number, initialY: number, currentX: number, currentY: number, isMoved: boolean } | null>(null);
+  /** 꾹 누르는 중인 대상. 시간을 채우기 전에는 draggingRef 가 비어 있어 아무것도 안 움직인다. */
+  const holdRef = useRef<{ timer: ReturnType<typeof setTimeout>, pointerId: number, type: 'ship' | 'zone', id: string, startX: number, startY: number } | null>(null);
+  /** 끌 준비가 된 마커. 상태로 두면 리렌더가 끌던 좌표를 되돌려 배가 튄다 —
+   *  그래서 React 를 거치지 않고 DOM 에 직접 테두리를 그린다. */
+  const armedElRef = useRef<HTMLElement | null>(null);
+  /** 두 손가락이 화면에 있는가. isPinching 은 리렌더용이고 이건 즉시 읽으려고 둔다. */
+  const pinchingRef = useRef(false);
+  /** 배 위에서 시작했지만 끌기가 아니라 지도를 미는 손짓으로 판정된 포인터.
+   *  마커에 touch-none 이 걸려 있어 브라우저가 대신 밀어주지 않는다. */
+  const panRef = useRef<{ pointerId: number, x: number, y: number } | null>(null);
+
+  const cancelHold = useCallback(() => {
+    if (!holdRef.current) return;
+    clearTimeout(holdRef.current.timer);
+    holdRef.current = null;
+  }, []);
+
   const dragThrottleTimer = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
@@ -654,29 +688,91 @@ export default function App() {
     }
   };
 
-  const onPointerDown = (e: ReactPointerEvent, id: string, type: 'ship' | 'zone') => {
-    if ((e.target as HTMLElement).closest('button')) return;
-    
-    // Set pointer capture to track outside container
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    
-    const initialX = type === 'ship' ? ships[id].x : zones[id].x;
-    const initialY = type === 'ship' ? ships[id].y : zones[id].y;
+  /** 잡혔다는 표시 — 빨간 테두리. 인자가 null 이면 지운다. */
+  const showArmed = (el: HTMLElement | null) => {
+    const prev = armedElRef.current;
+    if (prev) { prev.style.outline = ''; prev.style.outlineOffset = ''; prev.style.boxShadow = ''; }
+    armedElRef.current = el;
+    if (el) {
+      el.style.outline = '3px solid #ef4444';
+      el.style.outlineOffset = '2px';
+      el.style.boxShadow = '0 0 22px rgba(239,68,68,0.7)';
+    }
+  };
 
+  /** 끌기를 실제로 켠다. 마우스는 누르는 즉시, 터치는 DRAG_HOLD_MS 를 채운 뒤. */
+  const armDrag = (type: 'ship' | 'zone', id: string, clientX: number, clientY: number) => {
+    const src: any = type === 'ship' ? ships[id] : zones[id];
+    if (!src) return;
     draggingRef.current = {
       type,
       id,
-      startX: e.clientX,
-      startY: e.clientY,
-      initialX,
-      initialY,
-      currentX: initialX,
-      currentY: initialY,
+      startX: clientX,
+      startY: clientY,
+      initialX: src.x,
+      initialY: src.y,
+      currentX: src.x,
+      currentY: src.y,
       isMoved: false
+    };
+    const host = document.getElementById(`${type}-${id}`);
+    showArmed((host?.querySelector('.ship') as HTMLElement) ?? host);
+  };
+
+  const onPointerDown = (e: ReactPointerEvent, id: string, type: 'ship' | 'zone') => {
+    if ((e.target as HTMLElement).closest('button')) return;
+    cancelHold();
+    // 이미 두 손가락이면 줌 중이다. 배를 잡지 않는다.
+    if (pinchingRef.current) return;
+
+    // 손가락이 벗어나도 move/up 을 계속 받아야 흔들림(슬롭)을 판정할 수 있다.
+    try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* 이미 놓친 포인터 */ }
+
+    if (e.pointerType !== 'touch') {          // 마우스·펜은 예전 그대로 바로 끈다
+      armDrag(type, id, e.clientX, e.clientY);
+      return;
+    }
+
+    // 터치는 꾹 눌러야 끌린다. 줌아웃하다 손가락이 배에 닿아 배가 딸려가던 걸 막는다.
+    const { pointerId, clientX, clientY } = e;
+    holdRef.current = {
+      pointerId,
+      type,
+      id,
+      startX: clientX,
+      startY: clientY,
+      timer: setTimeout(() => {
+        holdRef.current = null;
+        if (pinchingRef.current) return;
+        armDrag(type, id, clientX, clientY);
+        navigator.vibrate?.(15);              // 잡혔다는 신호(안드로이드만 동작)
+      }, DRAG_HOLD_MS)
     };
   };
 
   const onPointerMove = (e: ReactPointerEvent) => {
+    // 아직 꾹 누르는 중이다. 이만큼 흔들렸으면 끌기가 아니라 지도 조작이다.
+    const hold = holdRef.current;
+    if (hold && e.pointerId === hold.pointerId) {
+      if (Math.abs(e.clientX - hold.startX) > DRAG_HOLD_SLOP ||
+          Math.abs(e.clientY - hold.startY) > DRAG_HOLD_SLOP) {
+        cancelHold();                                   // 끌기가 아니라 지도를 미는 손짓
+        panRef.current = { pointerId: e.pointerId, x: e.clientX, y: e.clientY };
+      }
+      return;
+    }
+    // 배 위에서 시작한 지도 밀기 — 여기서 직접 스크롤한다.
+    const pan = panRef.current;
+    if (pan && e.pointerId === pan.pointerId) {
+      const node = viewportRef.current;
+      if (node) {
+        node.scrollLeft -= e.clientX - pan.x;
+        node.scrollTop  -= e.clientY - pan.y;
+      }
+      pan.x = e.clientX; pan.y = e.clientY;
+      userMovedRef.current = true;
+      return;
+    }
     if (!draggingRef.current) return;
     
     const { type, id } = draggingRef.current;
@@ -754,10 +850,31 @@ export default function App() {
   };
 
   const onPointerUp = (e: ReactPointerEvent) => {
-    if (!draggingRef.current) return;
-    
+    const releaseCapture = () => {
+      try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId); } catch { /* 이미 놓았다 */ }
+    };
+
+    if (panRef.current?.pointerId === e.pointerId) {   // 지도만 밀었다
+      panRef.current = null;
+      releaseCapture();
+      return;
+    }
+
+    // 꾹 누르기를 채우기 전에 뗐다 — 예전처럼 선택만 한다.
+    const hold = holdRef.current;
+    if (hold && e.pointerId === hold.pointerId) {
+      cancelHold();
+      releaseCapture();
+      if (hold.type === 'ship') { setSelectedShipId(hold.id); setSelectedZoneId(null); }
+      else { setSelectedZoneId(hold.id); setSelectedShipId(null); }
+      return;
+    }
+
+    if (!draggingRef.current) { releaseCapture(); showArmed(null); return; }
+    showArmed(null);
+
     const { type, id, isMoved, currentX, currentY } = draggingRef.current;
-    (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+    releaseCapture();
     
     if (!isMoved) {
       if (type === 'ship') {
@@ -806,7 +923,13 @@ export default function App() {
   };
 
   const handleTouchStart = (e: React.TouchEvent) => {
-    if (e.touches.length === 2) {
+    if (e.touches.length >= 2) {
+      // 두 손가락이면 줌이다. 잡고 있던 배는 놓는다 — 줌아웃하다 배가 딸려가던 원인.
+      cancelHold();
+      panRef.current = null;
+      draggingRef.current = null;
+      showArmed(null);
+      pinchingRef.current = true;
       setIsPinching(true);
       const dist = Math.hypot(
         e.touches[0].clientX - e.touches[1].clientX,
@@ -819,6 +942,7 @@ export default function App() {
 
   const handleTouchEnd = (e: React.TouchEvent) => {
     if (e.touches.length < 2) {
+      pinchingRef.current = false;
       setIsPinching(false);
       pinchRef.current = null;
     }
@@ -1151,11 +1275,11 @@ export default function App() {
       >
         <div 
           className={isPinching ? '' : 'transition-all duration-200 ease-out'}
-          style={{ width: YARD_W * zoom, height: YARD_H * zoom }}
+          style={{ width: (YARD_W + YARD_PAD_L) * zoom, height: YARD_H * zoom }}
         >
           <div 
             ref={containerRef}
-            style={{ width: YARD_W, height: YARD_H, transform: `scale(${zoom})` }}
+            style={{ width: YARD_W, height: YARD_H, marginLeft: YARD_PAD_L * zoom, transform: `scale(${zoom})` }}
             className={`relative origin-top-left ${isPinching ? '' : 'transition-transform duration-300 ease-out'}`}
             onClick={handleMapClick}
           >
