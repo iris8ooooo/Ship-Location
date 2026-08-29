@@ -5,9 +5,9 @@ import { fetchVesselPlan, dateLabel, type VesselPlan } from './lib/vessel-plan';
 import { fetchRoster, specIsDF, OPEN_ROSTER, type Roster } from './lib/vessel-roster';
 import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User } from 'firebase/auth';
 import { db, auth } from './firebase';
-import YardMap, { YARD_REGIONS, YARD_HOME, YARD_W, YARD_H, YARD_ROTS,
+import YardMap, { YARD_REGIONS, YARD_W, YARD_H, YARD_ROTS,
   contentSize, mapTransform, mapToContent, contentToMap, screenDeltaToMap,
-  fullFit, homeFit, type YardRegion, type YardRot } from './components/YardMap';
+  fullFit, type YardRegion, type YardRot } from './components/YardMap';
 
 enum OperationType {
   CREATE = 'create',
@@ -315,10 +315,12 @@ export default function App() {
         return;
       }
       initedNode.current = node;
-      // 배가 놓이는 띠(YARD_HOME)에 맞춘다. 야드 전체를 폰 가로에 맞추면
-      // 0.25 밖에 안 나와 호선번호가 읽히지 않는다. 자세한 구역은 지역 버튼으로.
+      // ★첫 화면은 '전체' 다 (2026-08-29 사용자 지시). 예전에는 배가 놓이는 띠에
+      //  맞췄는데, 화면이 넓으면 그 계산이 상한(0.9)에 그대로 붙어 2안벽 하나만
+      //  꽉 찬 채로 시작했다. 어디를 보고 있는지 알 수 없는 화면이었다.
+      //  '전체' 버튼과 정확히 같은 배율·같은 중심으로 진입한다.
       const r = rotRef.current;
-      const z = homeFit(vw, vh, r);
+      const z = fullFit(vw, vh, r);
       setZoom(z);
       zoomRef.current = z;
       homeZoomRef.current = z;
@@ -333,8 +335,7 @@ export default function App() {
         inner.style.marginLeft = '';
         inner.style.transform = mapTransform(z, r);
       }
-      const H = YARD_HOME;
-      const c = mapToContent(H.x + H.w / 2, H.y + H.h / 2, z, r);
+      const c = mapToContent(YARD_W / 2, YARD_H / 2, z, r);
       node.scrollLeft = Math.max(0, Math.min(cs.w - vw, c.x - vw / 2));
       node.scrollTop  = Math.max(0, Math.min(cs.h - vh, c.y - vh / 2));
     };

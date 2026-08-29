@@ -152,8 +152,19 @@ export function planMoves(rows, live) {
     if (c.at) {
       // 실제 자리를 안다 — 슬롯을 고를 필요가 없다. 회전만 그 선석의 관례를 따른다
       // (안벽 계류는 90, 도크·돌핀은 0). 세이프티원의 angle 은 우리 각도계와 달라 쓰지 않는다.
-      slot = { x: Math.round(c.at.x), y: Math.round(c.at.y), r: BERTH_SLOTS[berth][0].r };
-    } else {
+      const want = { x: Math.round(c.at.x), y: Math.round(c.at.y) };
+      // ★단, 그 자리에 이미 배가 있으면 놓지 않는다 (2026-08-29 실제로 겹쳤다).
+      //  8265 를 실좌표 (83,575) 에 놓았더니 8206(75,560) 과 8px·15px 차이라
+      //  마커 폭 26px 안에서 완전히 포개졌다. 세이프티원 좌표로도 둘은 21px 차이 —
+      //  즉 실제로 나란히 붙어 있는(이중 계류) 배들이고, 좌표가 틀린 게 아니라
+      //  **그 간격이 마커 폭보다 좁은** 것이다. 지도에서는 겹치면 안 되므로
+      //  그럴 때는 그 선석의 빈 슬롯(이중 계류 자리 포함)으로 물러난다.
+      if (!occupied.some(o => near(o, want, 22))) {
+        slot = { ...want, r: BERTH_SLOTS[berth][0].r };
+        occupied.push({ x: slot.x, y: slot.y });
+      }
+    }
+    if (!slot) {
       slot = takeSlot(berth);
       if (!slot) { slot = takeSlot('waiting'); berth = 'waiting'; }
     }
