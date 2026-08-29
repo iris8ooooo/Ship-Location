@@ -122,7 +122,7 @@ jobs:
             echo "## 수집한 원본 (호선 → 위치/좌표)"
             echo
             echo '```'
-            node -e "const j=require('./out/safetyone-list.json');console.log('kind:',j.kind,'·',j.rows.length,'척');for(const r of j.rows)console.log(r.hull,'→',j.kind==='coords'?\`x=\${r.x} y=\${r.y} angle=\${r.angle} rot=\${r.rotation}\`:r.loc)"
+            node -e "const j=require('./out/safetyone-list.json');console.log('kind:',j.kind,'·',j.rows.length,'척');for(const r of j.rows)console.log(r.hull,'→',j.kind==='coords'?\`x=\${r.x} y=\${r.y} tm=(\${r.tmx},\${r.tmy}) angle=\${r.angle} dock=\${r.dock}\`:r.loc)"
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
