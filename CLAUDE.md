@@ -282,10 +282,9 @@ a.download='safetyone-map.png';a.href=c.toDataURL('image/png');a.click();})()
   호선 옆에 위치 배지를 달고, 배지 클릭 → 딥링크로 연다.
 - **역방향은 앱 진입이 아니라 카드 안 표시다(2026-08-29 사용자 지시).** 뷰어에서 배를
   탭하면 카드가 그 호선의 오늘을 공정관리 Supabase 에서 직접 읽어 보여준다
-  (`src/lib/vessel-plan.ts`). 노출 규칙은 **"공정기준 -5일"**: 공정은 오늘 걸친 것 +
-  시작 D-5 이내, 할일(work_tasks)은 날짜의 D-5 부터(지연 포함), 날짜 없는 호선 할일은
-  항상. `vessel_no='모든호선'` 도 포함. anon publishable 키는 공개용이고 두 테이블
-  anon SELECT 정책 확인함. LNG 앱의 `?vessel=` 딥링크 처리는 살아 있다(현재 미사용).
+  (`src/lib/vessel-plan.ts`). 노출 규칙은 **"공정기준 -5일"**: 오늘 걸친 공정 +
+  시작 D-5 이내 공정(vessel_schedules)만. **업무탭 할일(work_tasks)은 올리지 않는다
+  (2026-08-29 사용자 지시).** anon publishable 키는 공개용이고 anon SELECT 정책 확인함. LNG 앱의 `?vessel=` 딥링크 처리는 살아 있다(현재 미사용).
   LNG→십로케이션 방향(위치 배지 → ?hull=)은 그대로 산다.
 - LNG 레포 푸시는 된다(브랜치 푸시 + MCP 로 PR/머지 — #49 로 확인). "푸시 불가" 경고는 틀렸었다.
 

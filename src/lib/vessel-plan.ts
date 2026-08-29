@@ -4,8 +4,7 @@
  * 공정관리 앱으로 진입하는 대신 카드 안에서 바로 보여준다(2026-08-29 사용자 지시).
  * 노출 규칙은 사용자가 정한 "공정기준 -5일":
  *   - 공정(vessel_schedules): 오늘 걸쳐 있는 것 + 시작이 5일 안으로 다가온 것
- *   - 할일(work_tasks): 날짜 있는 건 그 날짜의 D-5 부터(지연된 것 포함),
- *     날짜 없는 건 그 호선에 등록돼 있으면 항상
+ *   - 업무탭 할일(work_tasks)은 올리지 않는다(2026-08-29 사용자 지시).
  *
  * anon 키는 공개용이다(브라우저 번들에 실리는 publishable key, RLS 가 접근을 정한다).
  * 두 테이블 모두 anon SELECT 가 열려 있음을 정책으로 확인했다(2026-08-29).
@@ -28,8 +27,6 @@ export interface VesselPlan {
   today: PlanItem[];
   /** 시작이 D-5 이내로 다가온 공정 */
   upcoming: PlanItem[];
-  /** 할일 (날짜 있는 건 D-5 부터, 없는 건 전부) */
-  todos: PlanItem[];
 }
 
 /** 로컬(한국시간) 기준 YYYY-MM-DD. toISOString 은 UTC 라 아침에 어제가 나온다. */
@@ -66,18 +63,9 @@ export async function fetchVesselPlan(hull: string): Promise<VesselPlan | null> 
       planned_start_date: `lte.${horizon}`,
       select: 'tank_no,activity_name,planned_start_date,duration_days,applicable',
     });
-    const todo = new URLSearchParams({
-      status: 'neq.done',
-      or: `(vessel_no.eq.${hull},vessel_no.eq.모든호선)`,
-      select: 'title,category,due_date,vessel_no',
-    });
-    const [rs, rt] = await Promise.all([
-      fetch(`${SUPA_URL}/vessel_schedules?${sched}`, { headers: HEADERS }),
-      fetch(`${SUPA_URL}/work_tasks?${todo}`, { headers: HEADERS }),
-    ]);
-    if (!rs.ok || !rt.ok) return null;
+    const rs = await fetch(`${SUPA_URL}/vessel_schedules?${sched}`, { headers: HEADERS });
+    if (!rs.ok) return null;
     const schedRows: any[] = await rs.json();
-    const todoRows: any[] = await rt.json();
 
     const todayItems: PlanItem[] = [];
     const upcoming: PlanItem[] = [];
@@ -99,16 +87,7 @@ export async function fetchVesselPlan(hull: string): Promise<VesselPlan | null> 
     }
     upcoming.sort((a, b) => (a.date! < b.date! ? -1 : 1));
 
-    const todos: PlanItem[] = todoRows
-      .filter(r => !r.due_date || r.due_date <= horizon)  // 날짜 있으면 D-5 부터(지연 포함)
-      .map(r => ({
-        label: `${r.category ? `[${r.category}] ` : ''}${r.title}`,
-        date: r.due_date ?? null,
-        dday: r.due_date ? diffDays(today, r.due_date) : null,
-      }))
-      .sort((a, b) => (a.dday ?? 999) - (b.dday ?? 999));
-
-    const plan = { today: todayItems, upcoming, todos };
+    const plan = { today: todayItems, upcoming };
     cache.set(hull, { at: Date.now(), plan });
     return plan;
   } catch {

@@ -1562,9 +1562,10 @@ export default function App() {
       </div>
 
       {/* 뷰어에서 배를 탭하면 뜨는 카드 — 호선번호·3중점검 위치에 더해, 그 호선의
-          당일 공정과 할일을 공정관리비서(Supabase)에서 읽어 바로 보여준다.
+          당일 공정을 공정관리비서(Supabase)에서 읽어 바로 보여준다.
           공정관리 앱으로 진입하지 않는다(2026-08-29 사용자 지시). 노출 규칙은
-          "공정기준 -5일": 공정은 오늘 것 + 시작 D-5 이내, 할일은 날짜의 D-5 부터. */}
+          "공정기준 -5일": 오늘 걸친 공정 + 시작 D-5 이내 공정.
+          업무탭 할일(work_tasks)은 올리지 않는다(같은 날 사용자 지시). */}
       {appMode !== 'admin' && selectedShipId && ships[selectedShipId] && (
         <div
           style={{ bottom: 'calc(3rem + 96px + env(safe-area-inset-bottom))' }}
@@ -1610,23 +1611,8 @@ export default function App() {
                     ))}
                   </div>
                 )}
-                {vesselPlan.todos.length > 0 && (
-                  <div>
-                    <div className="text-[11px] font-bold text-amber-700">할일</div>
-                    {vesselPlan.todos.map((it, i) => (
-                      <div key={i} className="text-gray-800 truncate">
-                        {it.dday !== null && (
-                          <span className={`font-bold ${it.dday < 0 ? 'text-red-600' : 'text-amber-700'}`}>
-                            {it.dday < 0 ? `D+${-it.dday}` : `D-${it.dday}`}{' '}
-                          </span>
-                        )}
-                        {it.label} {it.date && <span className="text-gray-400">{dateLabel(it.date)}</span>}
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {vesselPlan.today.length + vesselPlan.upcoming.length + vesselPlan.todos.length === 0 && (
-                  <div className="text-gray-400">오늘 공정·할일 없음</div>
+                {vesselPlan.today.length + vesselPlan.upcoming.length === 0 && (
+                  <div className="text-gray-400">오늘·임박 공정 없음</div>
                 )}
               </>
             )}
