@@ -25,12 +25,76 @@ export const YARD_H = 840;
 export const YARD_PAD_L = 100;
 
 /**
- * 첫 화면이 맞추는 범위 — 야드 전체.
- * 배 띠에만 맞추면 폰에서 0.78배까지 확대돼 야드의 3분의 1만 보였다. 어느 호선이
- * 어디 있는지 찾는 앱이라 한눈에 다 보이는 쪽이 낫고, 축소해서 글자가 뭉치는 건
- * 라벨 단계(아래 tiersFor)가 막는다.
+ * 첫 화면이 맞추는 범위 — 배가 실제로 놓이는 띠.
+ *
+ * 야드 전체(1380x840)를 폰 가로에 맞추면 0.25 밖에 안 돼 지도가 화면 위쪽
+ * 얇은 띠로만 나오고 호선번호가 뭉갠 점이 된다. 첫 화면의 용건은 "8283 어디
+ * 있냐" 이므로 배가 있는 구간에 맞춰 폰에서 0.43 근처로 뜬다.
+ * 위쪽 육지(y<215)와 동쪽 끝(1BERTH·플로팅)은 화면 밖으로 나가지만,
+ * 밀거나 지역 버튼으로 간다. 회전(90/270)하면 그때는 전체가 다 들어온다.
  */
-export const YARD_HOME = { x: 0, y: 0, w: 1380, h: 840 };
+export const YARD_HOME = { x: 0, y: 215, w: 860, h: 590 };
+
+/** 회전 각도 — 세 방향만 쓴다. 0 은 도면 그대로, 90/270 은 세로로 세운 것. */
+export type YardRot = 0 | 90 | 270;
+export const YARD_ROTS: YardRot[] = [0, 90, 270];
+
+/** 스크롤 콘텐츠 크기(px). 90/270 으로 세우면 가로세로가 바뀐다. */
+export function contentSize(z: number, rot: YardRot) {
+  const w = (YARD_W + YARD_PAD_L) * z, h = YARD_H * z;
+  return rot === 0 ? { w, h } : { w: h, h: w };
+}
+
+/**
+ * 컨테이너에 걸 transform. 오른쪽부터 적용된다 —
+ * 왼쪽 여백만큼 밀고 → 확대하고 → 돌리고 → 음수로 나간 만큼 되민다.
+ * marginLeft 로 여백을 주면 안 된다: 그건 회전 전 레이아웃이라 세웠을 때 어긋난다.
+ */
+export function mapTransform(z: number, rot: YardRot) {
+  const W = (YARD_W + YARD_PAD_L) * z, H = YARD_H * z;
+  const t = rot === 90 ? `translate(${H}px, 0px) `
+          : rot === 270 ? `translate(0px, ${W}px) ` : '';
+  return `${t}rotate(${rot}deg) scale(${z}) translate(${YARD_PAD_L}px, 0px)`;
+}
+
+/** 지도 좌표 → 스크롤 콘텐츠 좌표(px). 스크롤 목표를 잡을 때 쓴다. */
+export function mapToContent(x: number, y: number, z: number, rot: YardRot) {
+  const u = (x + YARD_PAD_L) * z, v = y * z;
+  const W = (YARD_W + YARD_PAD_L) * z, H = YARD_H * z;
+  if (rot === 90) return { x: H - v, y: u };
+  if (rot === 270) return { x: v, y: W - u };
+  return { x: u, y: v };
+}
+
+/** 스크롤 콘텐츠 좌표 → 지도 좌표. 핀치 기준점을 붙잡을 때 쓴다. */
+export function contentToMap(cx: number, cy: number, z: number, rot: YardRot) {
+  let u: number, v: number;
+  if (rot === 90) { v = YARD_H * z - cx; u = cy; }
+  else if (rot === 270) { v = cx; u = (YARD_W + YARD_PAD_L) * z - cy; }
+  else { u = cx; v = cy; }
+  return { x: u / z - YARD_PAD_L, y: v / z };
+}
+
+/** 화면에서 움직인 거리 → 지도에서 움직인 거리. 배를 끌 때 쓴다. */
+export function screenDeltaToMap(dx: number, dy: number, z: number, rot: YardRot) {
+  if (rot === 90) return { dx: dy / z, dy: -dx / z };
+  if (rot === 270) return { dx: -dy / z, dy: dx / z };
+  return { dx: dx / z, dy: dy / z };
+}
+
+/** 지도 전체(+왼쪽 여백)가 화면에 들어오는 배율. '전체' 버튼과 축소 하한이 쓴다. */
+export function fullFit(vw: number, vh: number, rot: YardRot) {
+  const { w, h } = contentSize(1, rot);
+  return Math.min(0.9, Math.max(0.14, Math.min(vw / (w * 1.04), vh / (h * 1.04))));
+}
+
+/** 첫 화면 배율 — 배가 있는 띠에 맞춘다. 축소 하한(fullFit)보다 내려가지 않는다. */
+export function homeFit(vw: number, vh: number, rot: YardRot) {
+  const H = YARD_HOME;
+  const [w, h] = rot === 0 ? [H.w, H.h] : [H.h, H.w];
+  const z = Math.min(vw / (w * 1.05), vh / (h * 1.05));
+  return Math.min(0.9, Math.max(fullFit(vw, vh, rot), z));
+}
 
 export interface YardRegion {
   id: string; label: string;

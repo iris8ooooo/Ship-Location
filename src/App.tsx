@@ -2,7 +2,9 @@ import React, { useCallback, useEffect, useRef, useState, PointerEvent as ReactP
 import { collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, addDoc, query, orderBy, limit } from 'firebase/firestore';
 import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User } from 'firebase/auth';
 import { db, auth } from './firebase';
-import YardMap, { YARD_REGIONS, YARD_HOME, YARD_W, YARD_H, YARD_PAD_L, type YardRegion } from './components/YardMap';
+import YardMap, { YARD_REGIONS, YARD_HOME, YARD_W, YARD_H, YARD_ROTS,
+  contentSize, mapTransform, mapToContent, contentToMap, screenDeltaToMap,
+  fullFit, homeFit, type YardRegion, type YardRot } from './components/YardMap';
 
 enum OperationType {
   CREATE = 'create',
@@ -54,7 +56,7 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
   console.error('Firestore Error: ', JSON.stringify(errInfo));
   throw new Error(JSON.stringify(errInfo));
 }
-import { RotateCcw, X, MessageSquare, Plus, Waves, Info, ChevronUp, ChevronDown, Droplets, ArrowUpCircle, ArrowDownCircle, Lock, Unlock } from 'lucide-react';
+import { RotateCcw, RotateCw, X, MessageSquare, Plus, Waves, Info, ChevronUp, ChevronDown, Droplets, ArrowUpCircle, ArrowDownCircle, Lock, Unlock } from 'lucide-react';
 
 interface ShipData {
   x: number;
@@ -82,6 +84,23 @@ interface TideInfo {
  *  두 손가락으로 줌아웃할 때 한 손가락이 배에 닿으면 배가 딸려가던 문제 때문에 넣었다.
  *  1초는 배를 여러 척 옮길 때 답답하고, 300ms 대는 핀치가 시작되는 구간과 겹친다.
  *  600ms 면 실수로 눌릴 일은 없으면서 "꾹" 한 번으로 잡힌다. */
+/**
+ * 호선번호 라벨의 회전각(선체 기준).
+ *
+ * 글자는 반드시 선체 긴 방향을 따라가야 한다 — 선체 폭이 26px 뿐이라 가로로 두면
+ * 밖으로 삐져나간다. 그래서 선택지는 -90 과 +90 둘뿐이고, 둘 중 화면에서
+ * 뒤집혀 보이지 않는 쪽을 고른다. 지도를 270도로 세웠을 때 이 선택을 안 하면
+ * 절반이 거꾸로 선다(실측).
+ */
+function hullLabelRot(shipR: number, rot: number) {
+  const norm = (a: number) => (((a % 360) + 540) % 360) - 180;   // (-180, 180]
+  const a = shipR + rot;                    // 선체의 화면상 각도
+  if (Math.abs(norm(a - 90)) < 90) return -90;
+  if (Math.abs(norm(a + 90)) < 90) return 90;
+  // 어느 쪽이든 세로다. 아래에서 위로 읽히는 -90 쪽으로 맞춘다.
+  return norm(a - 90) === -90 ? -90 : 90;
+}
+
 const DRAG_HOLD_MS = 600;
 /** 꾹 누르는 동안 이만큼(px) 움직이면 끌기가 아니라 지도 이동·핀치로 본다. */
 const DRAG_HOLD_SLOP = 8;
@@ -95,7 +114,6 @@ export default function App() {
   const [newShipName, setNewShipName] = useState('');
   const [newShipColor, setNewShipColor] = useState('yellow');
   const [zoom, setZoom] = useState(1);
-  const [isPinching, setIsPinching] = useState(false);
   const [appMode, setAppMode] = useState<'admin' | 'viewer'>('viewer');
   const [isAdminUrl, setIsAdminUrl] = useState(false);
   const [adminName, setAdminName] = useState('');
@@ -119,6 +137,13 @@ export default function App() {
   
   const containerRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
+  /** 지도 회전. 0 은 도면 그대로(가로로 김), 90/270 은 세워서 세로 화면을 채운다.
+   *  좌표계는 건드리지 않는다 — 컨테이너 transform 만 돌리므로 저장된 호선 좌표는 그대로다. */
+  const [rot, setRot] = useState<YardRot>(() => {
+    const saved = Number(localStorage.getItem('yardRot'));
+    return (YARD_ROTS as number[]).includes(saved) ? saved as YardRot : 0;
+  });
+  const rotRef = useRef<YardRot>(rot);
   // 첫 화면을 이미 맞춘 노드. 불리언 한 개로 두면 안 된다 — 로그인 직후 React 가
   // 이 div 를 한 번 교체하는데, 그때 새 노드는 스크롤이 0 인 채로 남는다.
   const initedNode = useRef<HTMLDivElement | null>(null);
@@ -144,29 +169,80 @@ export default function App() {
         e.preventDefault();                       // 기본 스크롤이 얹히지 않게
         userMovedRef.current = true;
         const rect = node.getBoundingClientRect();
-        const z1 = Math.min(3, Math.max(0.2, zoomRef.current + e.deltaY * -0.001));
+        const z1 = Math.min(3, Math.max(0.15, zoomRef.current + e.deltaY * -0.001));
         applyZoomAtRef.current?.(z1, e.clientX - rect.left, e.clientY - rect.top);
       };
+      // ── 지도는 브라우저가 아니라 앱이 민다 ───────────────────────────
+      // 뷰포트에 touch-action: none 이 걸려 있다(아래 JSX). pan-x pan-y 로 두면
+      // 두 손가락이 닿는 순간 브라우저가 몇 번의 touchmove 뒤에 touchcancel 을
+      // 던져 핀치가 뚝뚝 끊긴다(Firefox bug 964750, Chrome 도 같은 계열).
+      // 대신 한 손가락 밀기를 여기서 직접 처리한다.
+      let pan: { x: number, y: number } | null = null;
+
+      /** 배를 잡고 있거나 잡으려는 중이면 지도는 가만히 둔다(마커 쪽에서 처리). */
+      const shipBusy = () => !!(holdRef.current || draggingRef.current || panRef.current);
+
+      const onTouchStartNative = (e: TouchEvent) => {
+        if (e.touches.length === 1 && !shipBusy()) {
+          pan = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        } else {
+          pan = null;
+        }
+      };
       const onTouchMove = (e: TouchEvent) => {
-        if (e.touches.length !== 2 || !pinchRef.current) return;
-        e.preventDefault();                       // 핀치 중 기본 스크롤/줌 차단
-        const dist = Math.hypot(
-          e.touches[0].clientX - e.touches[1].clientX,
-          e.touches[0].clientY - e.touches[1].clientY,
-        );
-        const z1 = Math.min(3, Math.max(0.2, pinchRef.current.zoom * (dist / pinchRef.current.dist)));
-        const rect = node.getBoundingClientRect();
-        const mx = (e.touches[0].clientX + e.touches[1].clientX) / 2 - rect.left;
-        const my = (e.touches[0].clientY + e.touches[1].clientY) / 2 - rect.top;
-        applyZoomAtRef.current?.(z1, mx, my);
+        if (e.touches.length >= 2) {
+          e.preventDefault();                     // 핀치 중 기본 스크롤/줌 차단
+          pan = null;
+          const dist = Math.hypot(
+            e.touches[0].clientX - e.touches[1].clientX,
+            e.touches[0].clientY - e.touches[1].clientY,
+          );
+          // ★기준을 여기서도 잡는다. 두 번째 손가락의 touchstart 가 항상 두 개짜리
+          //  이벤트로 오지는 않는다(실측: 손가락 두 개가 거의 동시에 닿으면 touches=1
+          //  짜리 하나만 온다). touchstart 에만 기대면 그때 핀치가 통째로 죽는다.
+          if (!pinchRef.current) {
+            pinchRef.current = { dist, zoom: zoomRef.current };
+            pinchingRef.current = true;
+            cancelHoldRef.current?.();
+            panRef.current = null;
+            draggingRef.current = null;
+            showArmedRef.current?.(null);
+            return;
+          }
+          const z1 = Math.min(3, Math.max(0.15, pinchRef.current.zoom * (dist / pinchRef.current.dist)));
+          const rect = node.getBoundingClientRect();
+          const mx = (e.touches[0].clientX + e.touches[1].clientX) / 2 - rect.left;
+          const my = (e.touches[0].clientY + e.touches[1].clientY) / 2 - rect.top;
+          applyZoomAtRef.current?.(z1, mx, my);
+          return;
+        }
+        if (e.touches.length === 1 && pan && !shipBusy()) {
+          e.preventDefault();
+          const t = e.touches[0];
+          node.scrollLeft -= t.clientX - pan.x;
+          node.scrollTop  -= t.clientY - pan.y;
+          pan.x = t.clientX; pan.y = t.clientY;
+          userMovedRef.current = true;
+        }
+      };
+      const onTouchEndNative = (e: TouchEvent) => {
+        pan = e.touches.length === 1 && !shipBusy()
+          ? { x: e.touches[0].clientX, y: e.touches[0].clientY }   // 핀치 뒤 남은 손가락
+          : null;
       };
       const onPointerDown = () => { userMovedRef.current = true; };
       node.addEventListener('wheel', onWheel, { passive: false });
+      node.addEventListener('touchstart', onTouchStartNative, { passive: true });
       node.addEventListener('touchmove', onTouchMove, { passive: false });
+      node.addEventListener('touchend', onTouchEndNative, { passive: true });
+      node.addEventListener('touchcancel', onTouchEndNative, { passive: true });
       node.addEventListener('pointerdown', onPointerDown, { passive: true });
       nativeCleanup.current = () => {
         node.removeEventListener('wheel', onWheel);
+        node.removeEventListener('touchstart', onTouchStartNative);
         node.removeEventListener('touchmove', onTouchMove);
+        node.removeEventListener('touchend', onTouchEndNative);
+        node.removeEventListener('touchcancel', onTouchEndNative);
         node.removeEventListener('pointerdown', onPointerDown);
       };
     }
@@ -187,15 +263,10 @@ export default function App() {
         return;
       }
       initedNode.current = node;
-      // 야드 전체가 가로로 들어오게 맞춘다. 폭이 좁을수록 배율이 낮아지지만,
-      // 어느 호선이 어디 있는지 한눈에 보는 게 먼저고 자세히는 지역 버튼으로 간다.
-      // 왼쪽 여백(YARD_PAD_L)까지 같이 넣어야 축소했을 때 여백이 보인다. 빼면
-      // 여백이 화면 밖으로 밀려나 덧댄 의미가 없어진다.
-      // 하한 0.22 는 가장 좁은 기기(폴드 커버 344px)에서도 다 들어오는 값 —
-      // 여백만큼 좌표 폭이 넓어졌으니 예전 0.24 에서 같은 비율로 내렸다.
-      // 지도가 화면보다 짧아 남는 여백은 뷰포트 배경(바다색)이 그대로 이어받는다.
-      const H = YARD_HOME;
-      const z = Math.min(0.9, Math.max(0.22, Math.min(vw / ((H.w + YARD_PAD_L) * 1.05), vh / (H.h * 1.05))));
+      // 배가 놓이는 띠(YARD_HOME)에 맞춘다. 야드 전체를 폰 가로에 맞추면
+      // 0.25 밖에 안 나와 호선번호가 읽히지 않는다. 자세한 구역은 지역 버튼으로.
+      const r = rotRef.current;
+      const z = homeFit(vw, vh, r);
       setZoom(z);
       zoomRef.current = z;
       homeZoomRef.current = z;
@@ -203,14 +274,17 @@ export default function App() {
       // 잘리지 않는다. React 의 리렌더를 기다리면 한 프레임 늦어 0 으로 남는다.
       const wrap = node.firstElementChild as HTMLElement | null;
       const inner = wrap?.firstElementChild as HTMLElement | null;
+      const cs = contentSize(z, r);
       if (wrap && inner) {
-        wrap.style.width = `${(YARD_W + YARD_PAD_L) * z}px`;
-        wrap.style.height = `${YARD_H * z}px`;
-        inner.style.marginLeft = `${YARD_PAD_L * z}px`;
-        inner.style.transform = `scale(${z})`;
+        wrap.style.width = `${cs.w}px`;
+        wrap.style.height = `${cs.h}px`;
+        inner.style.marginLeft = '';
+        inner.style.transform = mapTransform(z, r);
       }
-      node.scrollLeft = Math.max(0, (H.x + H.w / 2 + YARD_PAD_L) * z - vw / 2);
-      node.scrollTop  = Math.max(0, (H.y + H.h / 2) * z - vh / 2);
+      const H = YARD_HOME;
+      const c = mapToContent(H.x + H.w / 2, H.y + H.h / 2, z, r);
+      node.scrollLeft = Math.max(0, Math.min(cs.w - vw, c.x - vw / 2));
+      node.scrollTop  = Math.max(0, Math.min(cs.h - vh, c.y - vh / 2));
     };
     requestAnimationFrame(apply);
   }, []);
@@ -222,6 +296,8 @@ export default function App() {
   useEffect(() => { zoomRef.current = zoom; }, [zoom]);
   const flyingRef = useRef(false);
   const applyZoomAtRef = useRef<((z: number, ax: number, ay: number) => void) | null>(null);
+  const cancelHoldRef = useRef<(() => void) | null>(null);
+  const showArmedRef = useRef<((el: HTMLElement | null) => void) | null>(null);
 
   /** 화면상의 한 점(ax, ay)을 고정한 채 배율만 바꾼다.
    *
@@ -236,14 +312,16 @@ export default function App() {
     if (!node || !inner || !wrap) return;
     const z0 = zoomRef.current;
     if (!z0) return;
-    const lx = (node.scrollLeft + ax) / z0;   // 고정하려는 지점의 논리 좌표
-    const ly = (node.scrollTop + ay) / z0;
-    wrap.style.width = `${(YARD_W + YARD_PAD_L) * z1}px`;
-    wrap.style.height = `${YARD_H * z1}px`;
-    inner.style.marginLeft = `${YARD_PAD_L * z1}px`;
-    inner.style.transform = `scale(${z1})`;
-    node.scrollLeft = Math.max(0, lx * z1 - ax);
-    node.scrollTop  = Math.max(0, ly * z1 - ay);
+    const r = rotRef.current;
+    // 손가락 아래에 있던 지도 좌표. 회전이 걸려 있으면 되돌려서 읽어야 한다.
+    const m = contentToMap(node.scrollLeft + ax, node.scrollTop + ay, z0, r);
+    const cs = contentSize(z1, r);
+    wrap.style.width = `${cs.w}px`;
+    wrap.style.height = `${cs.h}px`;
+    inner.style.transform = mapTransform(z1, r);
+    const c = mapToContent(m.x, m.y, z1, r);
+    node.scrollLeft = Math.max(0, c.x - ax);
+    node.scrollTop  = Math.max(0, c.y - ay);
     zoomRef.current = z1;
     setZoom(z1);
   }, []);
@@ -255,6 +333,36 @@ export default function App() {
    *  아직 이전 배율 기준이라 목표가 잘린다(실측: 목표 946 → 410에서 멈춤).
    *  그래서 애니메이션 동안에는 React 를 거치지 않고 DOM 을 직접 만지고,
    *  끝난 뒤에 최종 배율만 상태로 반영한다. */
+  useEffect(() => { rotRef.current = rot; }, [rot]);
+
+  /** 지도를 90도씩 세운다(0 → 90 → 270 → 0).
+   *  배율과 화면 한가운데 지도 좌표는 그대로 두고 방향만 바꾼다. 가로로 긴 야드가
+   *  세로로 서면서 세로 화면을 채우는 게 목적이라, 배율까지 건드리면 오히려 어긋난다. */
+  const rotateMap = useCallback(() => {
+    const node = viewportRef.current;
+    const inner = containerRef.current;
+    const wrap = inner?.parentElement as HTMLElement | null;
+    if (!node || !inner || !wrap || flyingRef.current) return;
+    const z = zoomRef.current;
+    const r0 = rotRef.current;
+    const vw = node.clientWidth, vh = node.clientHeight;
+    const m = contentToMap(node.scrollLeft + vw / 2, node.scrollTop + vh / 2, z, r0);
+
+    const r1 = YARD_ROTS[(YARD_ROTS.indexOf(r0) + 1) % YARD_ROTS.length];
+    rotRef.current = r1;
+    setRot(r1);
+    try { localStorage.setItem('yardRot', String(r1)); } catch { /* 사파리 비공개 모드 */ }
+    userMovedRef.current = true;
+
+    const cs = contentSize(z, r1);
+    wrap.style.width = `${cs.w}px`;
+    wrap.style.height = `${cs.h}px`;
+    inner.style.transform = mapTransform(z, r1);
+    const c = mapToContent(m.x, m.y, z, r1);
+    node.scrollLeft = Math.max(0, Math.min(cs.w - vw, c.x - vw / 2));
+    node.scrollTop  = Math.max(0, Math.min(cs.h - vh, c.y - vh / 2));
+  }, []);
+
   const flyTo = useCallback((r: YardRegion) => {
     const node = viewportRef.current;
     const inner = containerRef.current;
@@ -262,17 +370,24 @@ export default function App() {
     if (!node || !inner || !wrap || flyingRef.current) return;
 
     const vw = node.clientWidth, vh = node.clientHeight;
+    const rr = rotRef.current;
     const PAD = 1.18;                                  // 구역 가장자리 여유
-    // 구역마다 적당한 배율이 다르다. 도크·돌핀은 꽉 채우면 답답하고,
-    // 안벽은 가로로 길어 여유를 두면 전체보기와 구분이 안 된다. (YardMap 의 fit)
-    const FIT = r.fit ?? 0.8;
-    // 하한 0.3 을 그대로 두면 '전체' 가 첫 화면(0.25)보다 확대돼 왼쪽 끝이 잘린다.
-    // 첫 화면보다 더 축소할 일은 없으니 하한은 첫 화면 배율을 넘지 않게 잡는다.
-    const FLOOR = Math.min(0.3, homeZoomRef.current);
-    let z1 = Math.max(FLOOR, Math.min(2.2, Math.min(vw / (r.w * PAD), vh / (r.h * PAD)) * FIT));
-    // 안벽은 가로로 길어 폰에서는 화면보다 넓다. 그대로 맞추면 '확대' 버튼을
-    // 눌렀는데 오히려 축소돼 버린다. '전체' 말고는 첫 화면보다 축소하지 않는다.
-    if (r.id !== 'all') z1 = Math.max(z1, homeZoomRef.current);
+    let z1: number;
+    if (r.id === 'all') {
+      // '전체' 는 지도 전체(+왼쪽 여백)가 딱 들어오는 배율이다. 여기에 별도
+      // 하한을 두면 첫 화면보다 확대돼 오히려 왼쪽 끝이 잘린다.
+      z1 = fullFit(vw, vh, rr);
+    } else {
+      // 구역마다 적당한 배율이 다르다. 도크·돌핀은 꽉 채우면 답답하고,
+      // 안벽은 가로로 길어 여유를 두면 전체보기와 구분이 안 된다. (YardMap 의 fit)
+      const FIT = r.fit ?? 0.8;
+      // 세워 놓으면 구역의 가로세로가 화면 기준으로 뒤바뀐다.
+      const [rw, rh] = rr === 0 ? [r.w, r.h] : [r.h, r.w];
+      z1 = Math.min(2.2, Math.min(vw / (rw * PAD), vh / (rh * PAD)) * FIT);
+      // 안벽은 가로로 길어 폰에서는 화면보다 넓다. 그대로 맞추면 '확대' 버튼을
+      // 눌렀는데 오히려 축소돼 버린다. 첫 화면보다 축소하지 않는다.
+      z1 = Math.max(z1, homeZoomRef.current);
+    }
     const z0 = zoomRef.current;
     const sl0 = node.scrollLeft, st0 = node.scrollTop;
     const cx = r.x + r.w / 2, cy = r.y + r.h / 2;
@@ -293,12 +408,13 @@ export default function App() {
       const z = z0 + (z1 - z0) * e;
 
       // 크기를 먼저 넓힌 뒤 스크롤해야 목표가 잘리지 않는다.
-      wrap.style.width = `${(YARD_W + YARD_PAD_L) * z}px`;
-      wrap.style.height = `${YARD_H * z}px`;
-      inner.style.marginLeft = `${YARD_PAD_L * z}px`;
-      inner.style.transform = `scale(${z})`;
-      node.scrollLeft = Math.max(0, (cx + YARD_PAD_L) * z - vw / 2);
-      node.scrollTop  = Math.max(0, cy * z - vh / 2);
+      const cs = contentSize(z, rr);
+      wrap.style.width = `${cs.w}px`;
+      wrap.style.height = `${cs.h}px`;
+      inner.style.transform = mapTransform(z, rr);
+      const c = mapToContent(cx, cy, z, rr);
+      node.scrollLeft = Math.max(0, Math.min(cs.w - vw, c.x - vw / 2));
+      node.scrollTop  = Math.max(0, Math.min(cs.h - vh, c.y - vh / 2));
 
       if (p < 1) { requestAnimationFrame(step); return; }
       inner.style.transition = prevTransition;
@@ -504,6 +620,7 @@ export default function App() {
     clearTimeout(holdRef.current.timer);
     holdRef.current = null;
   }, []);
+  cancelHoldRef.current = cancelHold;
 
   const dragThrottleTimer = useRef<NodeJS.Timeout | null>(null);
 
@@ -699,6 +816,7 @@ export default function App() {
       el.style.boxShadow = '0 0 22px rgba(239,68,68,0.7)';
     }
   };
+  showArmedRef.current = showArmed;
 
   /** 끌기를 실제로 켠다. 마우스는 누르는 즉시, 터치는 DRAG_HOLD_MS 를 채운 뒤. */
   const armDrag = (type: 'ship' | 'zone', id: string, clientX: number, clientY: number) => {
@@ -778,9 +896,13 @@ export default function App() {
     const { type, id } = draggingRef.current;
     if (type === 'zone' && zones[id]?.isLocked) return;
 
-    const dx = (e.clientX - draggingRef.current.startX) / zoom;
-    const dy = (e.clientY - draggingRef.current.startY) / zoom;
-    
+    // 지도를 세워 놨으면 화면에서 오른쪽으로 민 것이 지도에서는 아래쪽이다.
+    const d = screenDeltaToMap(
+      e.clientX - draggingRef.current.startX,
+      e.clientY - draggingRef.current.startY,
+      zoom, rotRef.current);
+    const dx = d.dx, dy = d.dy;
+
     if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
       draggingRef.current.isMoved = true;
     } else if (!draggingRef.current.isMoved) {
@@ -930,7 +1052,6 @@ export default function App() {
       draggingRef.current = null;
       showArmed(null);
       pinchingRef.current = true;
-      setIsPinching(true);
       const dist = Math.hypot(
         e.touches[0].clientX - e.touches[1].clientX,
         e.touches[0].clientY - e.touches[1].clientY
@@ -943,7 +1064,6 @@ export default function App() {
   const handleTouchEnd = (e: React.TouchEvent) => {
     if (e.touches.length < 2) {
       pinchingRef.current = false;
-      setIsPinching(false);
       pinchRef.current = null;
     }
   };
@@ -1245,6 +1365,16 @@ export default function App() {
         className="fixed left-0 right-0 z-40 px-2 overflow-x-auto"
       >
         <div className="grid grid-rows-2 grid-flow-col gap-1 w-max mx-auto pb-0.5">
+          {/* 지도 세우기. 가로로 긴 야드를 세로 화면에 맞추는 용도라 지역 버튼과
+              같은 줄에 둔다 — 오른쪽 원형 버튼 줄에 넣었더니 지도를 덮었다. */}
+          <button
+            onClick={rotateMap}
+            aria-label="지도 회전"
+            className="row-span-2 px-2.5 sm:px-3 shrink-0 rounded-full bg-blue-600 text-white font-bold shadow-lg border border-blue-700 active:scale-95 transition-all flex flex-col items-center justify-center gap-0.5"
+          >
+            <RotateCw size={18} />
+            <span className="text-[10px] leading-none">{rot}°</span>
+          </button>
           {YARD_REGIONS.map(r => (
             <button
               key={r.id}
@@ -1268,19 +1398,20 @@ export default function App() {
       {/* Viewport */}
       <div 
         ref={attachViewport}
-        className="flex-1 overflow-auto relative touch-pan-x touch-pan-y bg-[#dbe9f4]"
+        className="flex-1 overflow-auto relative touch-none bg-[#dbe9f4]"
         onPointerDown={handleBackgroundPointerDown}
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
       >
         <div 
-          className={isPinching ? '' : 'transition-all duration-200 ease-out'}
-          style={{ width: (YARD_W + YARD_PAD_L) * zoom, height: YARD_H * zoom }}
+          /* 전환 없음 — 배율은 매 프레임 DOM 에 직접 쓴다. CSS 전환을 얹으면
+             손가락보다 늦게 따라와 핀치가 끊겨 보인다. */
+          style={{ width: contentSize(zoom, rot).w, height: contentSize(zoom, rot).h }}
         >
           <div 
             ref={containerRef}
-            style={{ width: YARD_W, height: YARD_H, marginLeft: YARD_PAD_L * zoom, transform: `scale(${zoom})` }}
-            className={`relative origin-top-left ${isPinching ? '' : 'transition-transform duration-300 ease-out'}`}
+            style={{ width: YARD_W, height: YARD_H, transform: mapTransform(zoom, rot) }}
+            className="relative origin-top-left"
             onClick={handleMapClick}
           >
             <YardMap zoom={zoom} />
@@ -1380,11 +1511,11 @@ export default function App() {
                     것이지 움직이는 중이 아니고, 25척이 각자 60fps 로 애니메이션을
                     돌리면 계속 리페인트가 일어나 폰이 뜨거워진다. */}
 
-                {/* 호선번호. 세로로 선 배는 글자를 한 자씩 쌓지 않고 라벨 자체를
-                    90도 눕혀 선체 방향으로 한 줄에 읽히게 한다 (세이프티원과 동일한 방식). */}
-                <div 
+                {/* 호선번호. 선체가 좁아(26px) 글자를 가로로 두면 안 들어가므로
+                    라벨을 눕혀 선체 방향으로 한 줄에 읽히게 한다(세이프티원과 같은 방식). */}
+                <div
                   className={`z-10 text-[26px] font-black drop-shadow-md ${isGreen ? 'text-white' : 'text-gray-900'}`}
-                  style={{ transform: `rotate(${ship.r % 180 === 0 ? -ship.r - 90 : -ship.r}deg)` }}
+                  style={{ transform: `rotate(${hullLabelRot(ship.r, rot)}deg)` }}
                 >
                   <div className="tracking-wider whitespace-nowrap">{id}</div>
                 </div>
@@ -1396,7 +1527,7 @@ export default function App() {
                     style={{
                       top: '50%',
                       left: '50%',
-                      transform: `translate(-50%, -50%) rotate(${-ship.r}deg)`,
+                      transform: `translate(-50%, -50%) rotate(${-ship.r - rot}deg)`,
                     }}
                   >
                     <div 
