@@ -44,8 +44,37 @@ const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
 // 기록하는 건 구조뿐이다: 메서드·경로(쿼리 제외)·상태·바이트수, 그리고 응답 안에
 // 호선번호/선석이 **몇 개** 들어 있는지. 내용은 담지 않는다(공개 로그).
 const BERTH_G = /(1도크|2도크|1안벽|2안벽|1돌핀|2돌핀|플로팅|1BERTH|시운전|출항|해상)/g;
+const BERTH_RE = /(1도크|2도크|1안벽|2안벽|1돌핀|2돌핀|플로팅|1BERTH|시운전|출항|해상)/;
+const HULL_RE = /^8\d{3}$/;
+
+/**
+ * JSON 아무 데서나 "호선번호처럼 생긴 값" 과 "선석처럼 생긴 값" 을 함께 가진 객체를 행으로 본다.
+ * 필드 이름을 모르고도 읽으려는 것이다 — 사내 API 의 필드명은 알 수 없고 바뀔 수도 있다.
+ */
+function rowsFromJson(node, out = [], seen = new Set()) {
+  if (Array.isArray(node)) { for (const v of node) rowsFromJson(v, out, seen); return out; }
+  if (!node || typeof node !== 'object') return out;
+  let hull = null, loc = null;
+  for (const v of Object.values(node)) {
+    if (typeof v !== 'string' && typeof v !== 'number') continue;
+    const t = String(v).trim();
+    if (!hull && HULL_RE.test(t)) hull = t;
+    if (!loc && BERTH_RE.test(t)) loc = t;
+  }
+  if (hull && loc && !seen.has(hull)) { seen.add(hull); out.push({ hull, loc: loc.slice(0, 120) }); }
+  for (const v of Object.values(node)) rowsFromJson(v, out, seen);
+  return out;
+}
+
 const netlog = [];
 const trace = [];
+/**
+ * ★데이터는 DOM 이 아니라 API 에 있다 (2026-08-29 실측).
+ *  지도는 <canvas> 라 호선번호가 픽셀로 그려져 DOM 에 없다 — 아무리 긁어도 안 나온다.
+ *  대신 화면이 부르는 JSON 에 다 들어 있다. 경로를 코드에 박지 않고,
+ *  **앱이 실제로 보낸 응답**에서 행이 읽히면 그걸 쓴다. 경로·파라미터가 바뀌어도 따라간다.
+ */
+const apiCands = [];
 page.on('response', async (res) => {
   const req = res.request();
   if (!['xhr', 'fetch'].includes(req.resourceType())) return;
@@ -56,6 +85,19 @@ page.on('response', async (res) => {
     rec.bytes = body.length;
     rec.호선번호수 = (body.match(/(^|[^0-9])8\d{3}([^0-9]|$)/g) || []).length;
     rec.선석수 = (body.match(BERTH_G) || []).length;
+    if (rec.호선번호수 >= 3 && rec.선석수 >= 3) {
+      let json = null;
+      try { json = JSON.parse(body); } catch { /* JSON 이 아니면 후보 아님 */ }
+      if (json) {
+        const rows = rowsFromJson(json);
+        if (rows.length >= 3) {
+          // 한 배에 한 줄인 응답을 고른다. 점검 이력처럼 호선당 수십 줄인 응답은
+          // 같은 호선이 여러 번 나와 "호선번호수/행수" 가 크다 — 그건 위치 원본이 아니다.
+          apiCands.push({ path: rec.path, rows, 반복도: rec.호선번호수 / rows.length });
+          rec.읽힌행 = rows.length;
+        }
+      }
+    }
   } catch { rec.bytes = -1; }
   netlog.push(rec);
 });
@@ -233,6 +275,7 @@ const CLICKABLE = 'button, a, [role="tab"], [role="button"], input[type="button"
 
 /** 어느 프레임에서든 행이 하나라도 읽히면 참. 결과가 떴는지의 유일한 신뢰 신호다. */
 async function anyRows() {
+  if (apiCands.some(c => c.rows.length >= 5)) return true;   // API 로 이미 들어왔다
   for (const f of page.frames()) {
     try { if ((await rowsFrom(f)).length) return true; } catch { /* 접근 못 하는 프레임 */ }
   }
@@ -273,18 +316,30 @@ for (const [step, re] of [['3중점검', /3중점검|삼중점검/], ['조회', 
 // 조회 응답이 늦을 수 있다. 행이 보일 때까지 최대 25초 기다린다.
 for (let i = 0; i < 50 && !(await anyRows()); i++) await page.waitForTimeout(500);
 
-const rows = [];
-const seenHull = new Set();
-for (const f of page.frames()) {
-  let got = [];
-  try { got = await rowsFrom(f); } catch { /* 접근 못 하는 프레임은 넘긴다 */ }
-  for (const r of got) if (!seenHull.has(r.hull)) { seenHull.add(r.hull); rows.push(r); }
+// ① API 응답에서 읽혔으면 그걸 쓴다. 반복도가 가장 낮은(= 한 배에 한 줄인) 응답을 고른다.
+let rows = [];
+let source = 'DOM';
+if (apiCands.length) {
+  const best = apiCands.sort((a, b) => a.반복도 - b.반복도 || b.rows.length - a.rows.length)[0];
+  rows = best.rows;
+  source = `API ${best.path}`;
+  console.log(`API 에서 읽음: ${best.path} — ${rows.length}척 (반복도 ${best.반복도.toFixed(1)})`);
+}
+
+// ② API 로 못 읽었으면 DOM 을 훑는다(예전 경로 — 표 화면을 열어 둔 경우).
+if (rows.length < 5) {
+  const seenHull = new Set(rows.map(r => r.hull));
+  for (const f of page.frames()) {
+    let got = [];
+    try { got = await rowsFrom(f); } catch { /* 접근 못 하는 프레임은 넘긴다 */ }
+    for (const r of got) if (!seenHull.has(r.hull)) { seenHull.add(r.hull); rows.push(r); }
+  }
 }
 
 // 야드엔 보통 20척 이상 있다. 몇 척 안 잡혔으면 리스트가 안 펼쳐진 것이다.
 if (rows.length < 5) await bail(`행을 ${rows.length}개밖에 못 읽었다 — 리스트가 안 펼쳐졌거나 화면 구조가 바뀌었다`);
 
 writeFileSync(outPath, JSON.stringify({ capturedAt: new Date().toISOString(), rows }, null, 1));
-console.log(`호선 ${rows.length}척 수집 → ${outPath}`);
+console.log(`호선 ${rows.length}척 수집 (${source}) → ${outPath}`);
 await browser.close();
 process.exit(0);
