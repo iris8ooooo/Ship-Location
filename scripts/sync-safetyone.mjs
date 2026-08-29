@@ -40,6 +40,18 @@ if (!rows.length) {
   process.exit(1);
 }
 
+// ★안전장치: 야드에 배가 여러 척인데 **선석이 한 종류뿐**이면 그건 현실이 아니라 오독이다.
+//  2026-08-29 에 실제로 그랬다 — 수집기가 배마다 다른 선석 대신 모든 레코드에 똑같이
+//  들어 있는 필드를 집어 14척 전부 "1안벽" 으로 읽었고, 그대로 써서 배 8척을 옮겼다.
+//  한 척도 옮기기 전에 여기서 멈춘다.
+{
+  const berths = new Set(rows.map(r => String(r.loc).split('>')[0].trim()));
+  if (rows.length >= 5 && berths.size < 2) {
+    console.error(`위치가 한 종류뿐이다 (${rows.length}척 전부 "${[...berths][0]}") — 수집이 잘못됐다. 아무것도 쓰지 않는다.`);
+    process.exit(1);
+  }
+}
+
 const cfg = JSON.parse(readFileSync(new URL('../firebase-applet-config.json', import.meta.url)));
 const db = getFirestore(initializeApp(cfg), cfg.firestoreDatabaseId);
 // 웹 SDK 는 FIRESTORE_EMULATOR_HOST 를 무시한다 — 직접 연결해 줘야
