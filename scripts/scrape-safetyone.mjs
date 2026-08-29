@@ -153,16 +153,20 @@ page.on('response', async (res) => {
     rec.bytes = body.length;
     rec.호선번호수 = (body.match(/(^|[^0-9])8\d{3}([^0-9]|$)/g) || []).length;
     rec.선석수 = (body.match(BERTH_G) || []).length;
-    if (rec.호선번호수 >= 3 && rec.선석수 >= 3) {
+    if (rec.호선번호수 >= 3) {
       let json = null;
-      try { json = JSON.parse(body); } catch { /* JSON 이 아니면 후보 아님 */ }
+      try { json = JSON.parse(body); } catch { rec.왜후보아님 = 'JSON 아님'; }
       if (json) {
+        // ★후보가 못 된 응답의 스키마도 남긴다. 후보만 찍었더니 정작 봐야 할
+        //  /gis/ships(호선 27·선석 14)를 못 보고 점검이력을 3번이나 물었다.
+        rec.스키마 = fieldShape(json);
         const rows = rowsFromJson(json);
+        rec.읽힌행 = rows.length;
+        if (rows.length < 3) rec.왜후보아님 = '호선+선석을 함께 가진 객체가 3건 미만';
         if (rows.length >= 3) {
           // 한 배에 한 줄인 응답을 고른다. 점검 이력처럼 호선당 수십 줄인 응답은
           // 같은 호선이 여러 번 나와 "호선번호수/행수" 가 크다 — 그건 위치 원본이 아니다.
-          apiCands.push({ path: rec.path, rows, 반복도: rec.호선번호수 / rows.length, 필드: fieldShape(json) });
-          rec.읽힌행 = rows.length;
+          apiCands.push({ path: rec.path, rows, 반복도: rec.호선번호수 / rows.length, 필드: rec.스키마 });
         }
       }
     }
@@ -413,8 +417,10 @@ console.log(`호선 ${rows.length}척 수집 (${source}) → ${outPath}`);
 //  실제로 그렇게 두 번 놓쳤다(전부 1안벽 / 작업내용 필드).
 console.log('----- 어느 응답에 무엇이 있었나 (값 없음, 이름·개수만) -----');
 console.log(JSON.stringify({
-  주고받은JSON: netlog.filter(r => r.bytes > 0),
-  후보: apiCands.map(c => ({ path: c.path, 행: c.rows.length, 반복도: Number(c.반복도.toFixed(1)), 필드: c.필드 })),
+  // 호선번호가 3개 이상 든 응답만 자세히. 지도 타일(wms)은 수십 개라 경로만 센다.
+  살펴본응답: netlog.filter(r => r.호선번호수 >= 3),
+  나머지: netlog.filter(r => r.호선번호수 < 3).reduce((m, r) => (m[r.path] = (m[r.path] || 0) + 1, m), {}),
+  후보: apiCands.map(c => ({ path: c.path, 행: c.rows.length, 반복도: Number(c.반복도.toFixed(1)) })),
   고른것: source,
 }, null, 1));
 console.log('----- 끝 -----');
