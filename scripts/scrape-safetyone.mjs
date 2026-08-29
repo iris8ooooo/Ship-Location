@@ -143,6 +143,18 @@ const trace = [];
  *  **앱이 실제로 보낸 응답**에서 행이 읽히면 그걸 쓴다. 경로·파라미터가 바뀌어도 따라간다.
  */
 const apiCands = [];
+/**
+ * ★배 위치의 정본은 지도 배 레이어 `/hsemo14/gis/ships` 다 (2026-08-29 실측 확정).
+ *  호선 27 · 선석 14 로 야드 실제 척수와 맞는다.
+ *
+ *  더는 "그럴듯한 응답을 골라내는 일반 규칙" 을 만들지 않는다. 세 번 다 틀렸다:
+ *   ① 모든 레코드에 같은 값인 필드 → 14척 전부 "1안벽"
+ *   ② 값이 갈리는 필드 → 작업내용("E/ROOM 전장 시운전 - GENERAL WORKS")
+ *   ③ 선석으로 시작하는 필드 → 점검이력의 workPlace(작업 장소, 호선 43개)
+ *  점검이력(pmo14003r04)은 애초에 배 위치표가 아니다 — 야드에 없는 호선까지 들어 있다.
+ */
+const SHIPS_LAYER = '/gis/ships';
+let shipsLayer = null;
 page.on('response', async (res) => {
   const req = res.request();
   if (!['xhr', 'fetch'].includes(req.resourceType())) return;
@@ -153,6 +165,10 @@ page.on('response', async (res) => {
     rec.bytes = body.length;
     rec.호선번호수 = (body.match(/(^|[^0-9])8\d{3}([^0-9]|$)/g) || []).length;
     rec.선석수 = (body.match(BERTH_G) || []).length;
+    if (u.pathname.endsWith(SHIPS_LAYER)) {
+      try { shipsLayer = JSON.parse(body); rec.배레이어 = true; }
+      catch { rec.배레이어 = 'JSON 아님'; }
+    }
     if (rec.호선번호수 >= 3) {
       let json = null;
       try { json = JSON.parse(body); } catch { rec.왜후보아님 = 'JSON 아님'; }
@@ -347,7 +363,7 @@ const CLICKABLE = 'button, a, [role="tab"], [role="button"], input[type="button"
 
 /** 어느 프레임에서든 행이 하나라도 읽히면 참. 결과가 떴는지의 유일한 신뢰 신호다. */
 async function anyRows() {
-  if (apiCands.some(c => c.rows.length >= 5)) return true;   // API 로 이미 들어왔다
+  if (shipsLayer) return true;                               // 지도 배 레이어가 왔다
   for (const f of page.frames()) {
     try { if ((await rowsFrom(f)).length) return true; } catch { /* 접근 못 하는 프레임 */ }
   }
@@ -388,14 +404,18 @@ for (const [step, re] of [['3중점검', /3중점검|삼중점검/], ['조회', 
 // 조회 응답이 늦을 수 있다. 행이 보일 때까지 최대 25초 기다린다.
 for (let i = 0; i < 50 && !(await anyRows()); i++) await page.waitForTimeout(500);
 
-// ① API 응답에서 읽혔으면 그걸 쓴다. 반복도가 가장 낮은(= 한 배에 한 줄인) 응답을 고른다.
+// ① 지도 배 레이어에서만 읽는다. 다른 응답은 배 위치표가 아니다.
 let rows = [];
 let source = 'DOM';
-if (apiCands.length) {
-  const best = apiCands.sort((a, b) => a.반복도 - b.반복도 || b.rows.length - a.rows.length)[0];
-  rows = best.rows;
-  source = `API ${best.path}`;
-  console.log(`API 에서 읽음: ${best.path} — ${rows.length}척 (반복도 ${best.반복도.toFixed(1)})`);
+if (shipsLayer) {
+  rows = rowsFromJson(shipsLayer);
+  source = `지도 배 레이어 ${SHIPS_LAYER}`;
+  console.log(`지도 배 레이어에서 읽음 — ${rows.length}척`);
+  console.log('----- 배 레이어 스키마 (값 없음, 이름·개수만) -----');
+  console.log(JSON.stringify(fieldShape(shipsLayer), null, 1));
+  console.log('----- 끝 -----');
+} else {
+  console.log(`지도 배 레이어(${SHIPS_LAYER})가 오지 않았다 — DOM 을 훑는다.`);
 }
 
 // ② API 로 못 읽었으면 DOM 을 훑는다(예전 경로 — 표 화면을 열어 둔 경우).
