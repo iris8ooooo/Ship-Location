@@ -152,15 +152,6 @@ if (await pw.count()) {
   console.log('로그인 화면이 아니다 — 세션이 살아 있거나 바로 본화면');
 }
 
-// ── 3중점검 화면으로 ──────────────────────────────────────────────────────
-for (const label of ['3중점검', '리스트']) {
-  const el = page.locator(`text=${label}`).first();
-  if (await el.count()) {
-    await el.click({ timeout: 5000 }).catch(() => {});
-    await page.waitForTimeout(3000);
-  }
-}
-
 // ── 리스트 추출 ──────────────────────────────────────────────────────────
 // 프레임을 전부 훑는다 — 사내 시스템은 본문을 iframe 에 담는 경우가 흔하다.
 // 행은 tr/li 만이 아니라 **div 그리드**일 수도 있어 div 까지 후보로 본다.
@@ -201,6 +192,54 @@ async function rowsFrom(frame) {
     return out;
   });
 }
+
+// ── 3중점검 리스트 열기 ───────────────────────────────────────────────────
+// ★세이프티원은 Vue(Vuetify) SPA 다 (2026-08-29 실측: v-btn·v-row·v-expansion-panel,
+//  table 0개, 처음 화면에 호선번호 0개). 즉 **화면을 열었다고 데이터가 있는 게 아니라
+//  "조회" 를 눌러야 뜬다.** 예전엔 "리스트" 를 찾았는데 이 사이트엔 그런 이름이 없다.
+//  검색 조건은 접힌 v-expansion-panel 안에 있고, 그 패널 제목에도 "조회" 가 들어 있어
+//  제목을 누르면 오히려 패널이 접힌다 — 그래서 제목은 빼고 실제 버튼만 누른다.
+const CLICKABLE = 'button, a, [role="tab"], [role="button"], input[type="button"], input[type="submit"]';
+
+/** 어느 프레임에서든 행이 하나라도 읽히면 참. 결과가 떴는지의 유일한 신뢰 신호다. */
+async function anyRows() {
+  for (const f of page.frames()) {
+    try { if ((await rowsFrom(f)).length) return true; } catch { /* 접근 못 하는 프레임 */ }
+  }
+  return false;
+}
+
+/**
+ * 이름이 맞는 첫 요소를 누른다.
+ * 패널 제목(v-expansion-panel-title)에도 "조회" 가 들어 있어 그걸 누르면 패널이 접힌다.
+ * 그래서 제목을 뺀 후보를 먼저 시도하고, 없을 때만 전체를 본다.
+ */
+const NOT_PANEL = 'button:not(.v-expansion-panel-title), a, [role="tab"], [role="button"], input[type="button"], input[type="submit"]';
+async function clickNamed(re) {
+  for (const f of page.frames()) {
+    for (const sel of [NOT_PANEL, CLICKABLE]) {
+      const el = f.locator(sel).filter({ hasText: re }).first();
+      try {
+        if (await el.count() === 0) continue;
+        await el.click({ timeout: 4000 });
+        return true;
+      } catch { /* 안 눌리면 다음 후보 */ }
+    }
+  }
+  return false;
+}
+
+await page.waitForLoadState('networkidle').catch(() => {});
+
+// 이미 3중점검 화면이면(router-link-exact-active) 누를 필요가 없지만, 아니면 눌러 들어간다.
+if (!await anyRows()) { await clickNamed(/3중점검|삼중점검/); await page.waitForTimeout(1500); }
+// 조회 — 이게 핵심이다. 누르지 않으면 표가 비어 있다.
+if (!await anyRows()) { await clickNamed(/조회|검색/); await page.waitForTimeout(1500); }
+// 기본이 지도 화면이면 표는 "리스트/목록" 을 눌러야 나온다.
+if (!await anyRows()) { await clickNamed(/리스트|목록/); await page.waitForTimeout(1500); }
+
+// 조회 응답이 늦을 수 있다. 행이 보일 때까지 최대 25초 기다린다.
+for (let i = 0; i < 50 && !(await anyRows()); i++) await page.waitForTimeout(500);
 
 const rows = [];
 const seenHull = new Set();
