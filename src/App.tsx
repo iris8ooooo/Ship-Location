@@ -59,7 +59,7 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
   console.error('Firestore Error: ', JSON.stringify(errInfo));
   throw new Error(JSON.stringify(errInfo));
 }
-import { RotateCcw, RotateCw, X, MessageSquare, Plus, Waves, Info, ChevronUp, ChevronDown, Droplets, ArrowUpCircle, ArrowDownCircle, Lock, Unlock } from 'lucide-react';
+import { RotateCcw, RotateCw, X, MessageSquare, Plus, Waves, Info, ChevronUp, ChevronDown, Droplets, ArrowUpCircle, ArrowDownCircle, Lock, Unlock, ArrowLeftRight } from 'lucide-react';
 
 interface ShipData {
   x: number;
@@ -898,6 +898,25 @@ export default function App() {
       } catch (error) {
         handleFirestoreError(error, OperationType.DELETE, 'ships');
       }
+    }
+  };
+
+  /**
+   * 뱃머리 뒤집기(180°). 선수·선미는 **세이프티원에 없는 정보**라 사람만 정할 수 있다
+   * (배 레이어 angle 은 0/±90 두 값 = 축뿐, 원본 도면도 배를 대칭으로 그린다).
+   * 90° 회전과 따로 두는 이유: 축은 수집이 세이프티원 값으로 되돌리므로 90° 는
+   * 다음 수집에 사라지고, 앞뒤만 남는다. 여기가 사람의 몫이다.
+   */
+  const handleFlipShip = async (e: React.PointerEvent, id: string) => {
+    e.stopPropagation();
+    const ship = ships[id];
+    if (!ship) return;
+    const newR = (ship.r + 180) % 360;
+    try {
+      await updateDoc(doc(db, 'ships', id), { r: newR });
+      logAction('뱃머리 뒤집기', id);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, 'ships');
     }
   };
 
@@ -1873,7 +1892,15 @@ export default function App() {
 
                 {isSelected && appMode === 'admin' && (
                   <div className="absolute right-[-100px] top-[-40px] flex flex-col gap-[20px] z-50">
+                    <button
+                      aria-label="뱃머리 뒤집기"
+                      className="w-[80px] h-[80px] bg-white border-[3px] border-gray-800 rounded-full text-black flex items-center justify-center shadow-xl hover:bg-gray-100 active:bg-gray-200 pointer-events-auto"
+                      onPointerDown={(e) => handleFlipShip(e, id)}
+                    >
+                      <ArrowLeftRight size={40} />
+                    </button>
                     <button 
+                      aria-label="90도 회전"
                       className="w-[80px] h-[80px] bg-white border-[3px] border-gray-800 rounded-full text-black flex items-center justify-center shadow-xl hover:bg-gray-100 active:bg-gray-200 pointer-events-auto"
                       onPointerDown={(e) => handleRotateShip(e, id)}
                     >
