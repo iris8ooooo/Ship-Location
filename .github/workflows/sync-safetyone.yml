@@ -123,11 +123,27 @@ jobs:
       - name: Show what was collected
         if: steps.precheck.outputs.ready == 'true' && github.event_name == 'workflow_dispatch' && inputs.mode != 'apply'
         run: |
+          # 따옴표 탈출 지옥을 피하려고 heredoc 으로 파일에 쓴 뒤 돌린다.
+          # 인용된 구분자('EOF')라 셸이 안쪽을 건드리지 않는다.
+          cat > out/show.mjs <<'EOF'
+          import { readFileSync } from 'node:fs';
+          import { tmToYard } from '../src/lib/yard-transform.mjs';
+          const j = JSON.parse(readFileSync('out/safetyone-list.json', 'utf8'));
+          console.log(`kind: ${j.kind} · ${j.rows.length}척`);
+          for (const r of j.rows) {
+            if (j.kind !== 'coords') { console.log(r.hull, '→', r.loc); continue; }
+            const p = tmToYard(r.tmx, r.tmy);
+            const at = p ? `yard=(${p.x.toFixed(1)},${p.y.toFixed(1)})` : 'yard=?';
+            // 선수선미 방향을 붙이려면 angle·rotation 의 정체를 먼저 알아야 한다.
+            // 값을 눈으로 보려고 같이 찍는다(호선번호·각도뿐 — 공개 로그 안전).
+            console.log(r.hull, '→', at, `angle=${r.angle} rot=${r.rotation} L=${r.length} W=${r.width} dock=${r.dock}`);
+          }
+          EOF
           {
-            echo "## 수집한 원본 (호선 → 위치/좌표)"
+            echo "## 수집한 원본 (호선 → 좌표·각도)"
             echo
             echo '```'
-            node -e "const j=require('./out/safetyone-list.json');console.log('kind:',j.kind,'·',j.rows.length,'척');for(const r of j.rows)console.log(r.hull,'→',j.kind==='coords'?\`x=\${r.x} y=\${r.y} tm=(\${r.tmx},\${r.tmy}) angle=\${r.angle} dock=\${r.dock}\`:r.loc)"
+            node out/show.mjs
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
