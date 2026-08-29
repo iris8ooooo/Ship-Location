@@ -23,6 +23,11 @@ on:
   schedule:
     - cron: '0 21-23,0-11 * * *'   # KST 06:00~20:00 매시
   workflow_dispatch:
+    inputs:
+      dry:
+        description: '미리보기만 (파이어스토어에 쓰지 않음)'
+        type: boolean
+        default: false
 
 concurrency:
   group: sync-safetyone
@@ -100,10 +105,23 @@ jobs:
           SAFETYONE_PW: ${{ secrets.SAFETYONE_PW }}
         run: node scripts/scrape-safetyone.mjs --out out/safetyone-list.json
 
+      # 미리보기일 때는 무엇을 읽었는지도 같이 본다 — 위치 문자열이 제대로 왔는지
+      # 확인하지 않고 프로덕션에 쓰면 배를 엉뚱한 데로 옮긴다(2026-08-29 실제로 그랬다).
+      - name: Show what was collected (dry run only)
+        if: steps.precheck.outputs.ready == 'true' && inputs.dry
+        run: |
+          {
+            echo "## 수집한 원본 (호선 → 위치)"
+            echo
+            echo '```'
+            node -e "const j=require('./out/safetyone-list.json');for(const r of j.rows)console.log(r.hull,'→',r.loc)"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
       - name: Apply to Firestore
         if: steps.precheck.outputs.ready == 'true'
         run: |
-          node scripts/sync-safetyone.mjs --input out/safetyone-list.json | tee out/apply.log
+          node scripts/sync-safetyone.mjs --input out/safetyone-list.json ${{ inputs.dry && '--dry' || '' }} | tee out/apply.log
           {
             echo "## 3중점검 수집 결과"
             echo
