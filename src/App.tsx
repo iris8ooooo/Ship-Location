@@ -1549,6 +1549,39 @@ export default function App() {
         </div>
       </div>
 
+      {/* 뷰어에서 배를 탭하면 뜨는 카드. 선석·원문 위치와 공정관리비서 역링크.
+          역링크는 ?vessel= 딥링크로 그 호선의 탱크 시트가 바로 열린다. */}
+      {appMode !== 'admin' && selectedShipId && ships[selectedShipId] && (
+        <div
+          style={{ bottom: 'calc(3rem + 96px + env(safe-area-inset-bottom))' }}
+          className="fixed left-1/2 -translate-x-1/2 z-40 bg-white/95 backdrop-blur rounded-2xl shadow-xl border border-gray-200 pl-4 pr-2 py-2 flex items-center gap-3 max-w-[92vw]"
+        >
+          <div className="min-w-0">
+            <div className="font-black text-gray-900 leading-tight">{selectedShipId}</div>
+            {(ships[selectedShipId] as any).berth && (
+              <div className="text-xs text-gray-600 truncate max-w-[40vw]">
+                {(ships[selectedShipId] as any).loc ?? (ships[selectedShipId] as any).berth}
+              </div>
+            )}
+          </div>
+          <a
+            href={`https://lng-pump-tower-process-manager.vercel.app/?vessel=${selectedShipId}`}
+            target="_blank"
+            rel="noreferrer"
+            className="shrink-0 px-3 py-1.5 rounded-full bg-blue-600 text-white text-sm font-bold no-underline active:scale-95 transition-all"
+          >
+            공정관리
+          </a>
+          <button
+            onClick={() => setSelectedShipId(null)}
+            aria-label="닫기"
+            className="shrink-0 w-8 h-8 rounded-full text-gray-400 hover:bg-gray-100 flex items-center justify-center"
+          >
+            <X size={18} />
+          </button>
+        </div>
+      )}
+
       {isAddingZone && appMode === 'admin' && (
         <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-red-500 text-white px-6 py-3 rounded-full font-bold shadow-lg z-50 animate-pulse pointer-events-none">
           원하는 위치를 탭하여 마그네틱 영역을 생성하세요
@@ -1638,7 +1671,7 @@ export default function App() {
                 id={`ship-${id}`}
                 key={id}
                 className={`absolute w-[26px] h-[130px] select-none touch-none transition-transform duration-300
-                  ${appMode === 'admin' ? 'cursor-grab active:cursor-grabbing active:z-[999]' : 'cursor-default'}
+                  ${appMode === 'admin' ? 'cursor-grab active:cursor-grabbing active:z-[999]' : 'cursor-pointer'}
                   ${isSelected && appMode === 'admin' ? 'z-[100]' : 'z-10'}
                 `}
                 style={{
@@ -1650,6 +1683,7 @@ export default function App() {
                 onPointerMove={appMode === 'admin' ? onPointerMove : undefined}
                 onPointerUp={appMode === 'admin' ? onPointerUp : undefined}
                 onPointerCancel={appMode === 'admin' ? onPointerUp : undefined}
+                onClick={appMode !== 'admin' ? () => setSelectedShipId(prev => prev === id ? null : id) : undefined}
               >
                 <div
                   className={`ship relative w-full h-full border-[2px] border-gray-800 rounded-[50%_50%_8px_8px] flex flex-col items-center justify-center transition-all duration-300
