@@ -24,17 +24,6 @@ export const YARD_H = 840;
  *  지도는 그대로 두고 앱이 스크롤 영역만 이만큼 왼쪽으로 넓힌다. */
 export const YARD_PAD_L = 100;
 
-/**
- * 첫 화면이 맞추는 범위 — 배가 실제로 놓이는 띠.
- *
- * 야드 전체(1380x840)를 폰 가로에 맞추면 0.25 밖에 안 돼 지도가 화면 위쪽
- * 얇은 띠로만 나오고 호선번호가 뭉갠 점이 된다. 첫 화면의 용건은 "8283 어디
- * 있냐" 이므로 배가 있는 구간에 맞춰 폰에서 0.43 근처로 뜬다.
- * 위쪽 육지(y<215)와 동쪽 끝(1BERTH·플로팅)은 화면 밖으로 나가지만,
- * 밀거나 지역 버튼으로 간다. 회전(90/270)하면 그때는 전체가 다 들어온다.
- */
-export const YARD_HOME = { x: 0, y: 215, w: 860, h: 590 };
-
 /** 회전 각도 — 세 방향만 쓴다. 0 은 도면 그대로, 90/270 은 세로로 세운 것. */
 export type YardRot = 0 | 90 | 270;
 export const YARD_ROTS: YardRot[] = [0, 90, 270];
@@ -85,15 +74,13 @@ export function screenDeltaToMap(dx: number, dy: number, z: number, rot: YardRot
 /** 지도 전체(+왼쪽 여백)가 화면에 들어오는 배율. '전체' 버튼과 축소 하한이 쓴다. */
 export function fullFit(vw: number, vh: number, rot: YardRot) {
   const { w, h } = contentSize(1, rot);
-  return Math.min(0.9, Math.max(0.14, Math.min(vw / (w * 1.04), vh / (h * 1.04))));
-}
-
-/** 첫 화면 배율 — 배가 있는 띠에 맞춘다. 축소 하한(fullFit)보다 내려가지 않는다. */
-export function homeFit(vw: number, vh: number, rot: YardRot) {
-  const H = YARD_HOME;
-  const [w, h] = rot === 0 ? [H.w, H.h] : [H.h, H.w];
-  const z = Math.min(vw / (w * 1.05), vh / (h * 1.05));
-  return Math.min(0.9, Math.max(fullFit(vw, vh, rot), z));
+  // ★'전체' 는 딱 맞추지 않고 10% 더 당긴다 (2026-08-29 사용자 지시).
+  //  가장자리가 살짝 잘리더라도 야드가 화면을 채우는 쪽이 낫다 — 정확히 맞추면
+  //  둘레에 빈 바다만 남아 정작 배가 작아진다.
+  //  상한도 0.9 → 1.0 으로 올렸다. 데스크톱처럼 넓은 화면에서는 0.9 에 걸려
+  //  10% 가 통째로 무시됐다.
+  const z = Math.min(vw / (w * 1.04), vh / (h * 1.04)) * 1.1;
+  return Math.min(1.0, Math.max(0.14, z));
 }
 
 export interface YardRegion {
