@@ -107,6 +107,39 @@ function hullLabel(shipR: number, rot: number): { rot: number; stack: boolean } 
   return { rot: -a, stack: true };                    // 선체가 세로 — 한 자씩 쌓는다
 }
 
+/**
+ * 화면 아래에 쌓이는 것(지역 버튼 줄·조석 패널)의 **실제 높이**를 CSS 변수로 내려보낸다.
+ *
+ * 높이를 `6.5rem` 처럼 손으로 박아두면 브레이크포인트마다 어긋난다. 실제로 어긋났다:
+ * 지역 버튼 줄은 작은 화면 70px / sm 이상 78px 인데 조석 패널이 104px 에 고정돼 있어
+ * 폰 전 기종에서 14px, 아이패드 미니에서 22px 을 파고들었다(2026-08-29 실측).
+ * 그래서 **한 곳에서 재서 나눠 준다** — 임계값을 여러 군데 흩뿌리지 않는다.
+ *
+ * md 이상에서 패널이 화면 위쪽으로 붙을 때는 0 을 준다 — 아래에 쌓이지 않으므로
+ * 아무것도 밀어 올리면 안 된다. 이때 `getComputedStyle().bottom` 은 쓸 수 없다:
+ * 위치가 잡힌 요소의 top/bottom 은 `auto` 라도 **계산된 px 값**으로 나온다
+ * (실측: bottom:auto 인 데스크톱에서 "744px"). 그래서 위아래 중 어느 쪽에
+ * 더 붙어 있는지로 가른다 — 브레이크포인트를 JS 에 또 적지 않아도 된다.
+ */
+function usePublishedHeight(name: string) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const publish = () => {
+      const r = el.getBoundingClientRect();
+      const stacked = window.innerHeight - r.bottom < r.top;   // 아래에 더 붙어 있나
+      document.documentElement.style.setProperty(name, `${stacked ? el.offsetHeight : 0}px`);
+    };
+    publish();
+    const ro = new ResizeObserver(publish);
+    ro.observe(el);
+    window.addEventListener('resize', publish);
+    return () => { ro.disconnect(); window.removeEventListener('resize', publish); };
+  }, [name]);
+  return ref;
+}
+
 const DRAG_HOLD_MS = 600;
 /** 꾹 누르는 동안 이만큼(px) 움직이면 끌기가 아니라 지도 이동·핀치로 본다. */
 const DRAG_HOLD_SLOP = 8;
@@ -153,6 +186,9 @@ export default function App() {
   
   const containerRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
+  /** 아래에 쌓이는 것들의 실측 높이. 서로를 밀어 올리는 기준이 된다. */
+  const dockRef = usePublishedHeight('--dock-h');
+  const sheetRef = usePublishedHeight('--sheet-h');
   /** 지도 회전. 0 은 도면 그대로(가로로 김), 90/270 은 세워서 세로 화면을 채운다.
    *  좌표계는 건드리지 않는다 — 컨테이너 transform 만 돌리므로 저장된 호선 좌표는 그대로다. */
   const [rot, setRot] = useState<YardRot>(() => {
@@ -1336,9 +1372,11 @@ export default function App() {
           폰: 아래에서 올라오는 시트. md 이상: 오른쪽 FAB 옆에 붙는 패널.
           닫혀 있으면 렌더 자체를 안 해서 지도를 조금도 가리지 않는다. */}
       <div
+        ref={sheetRef}
+        style={{ bottom: 'calc(3rem + var(--dock-h, 4.5rem) + 0.5rem + env(safe-area-inset-bottom))' }}
         className={`fixed z-40 flex flex-col gap-2 transition-all duration-300 ease-out
-          left-2 right-2 bottom-[calc(6.5rem+env(safe-area-inset-bottom))]
-          md:left-auto md:right-20 md:top-24 md:bottom-auto md:w-[340px]
+          left-2 right-2
+          md:left-auto md:right-20 md:top-24 md:bottom-auto! md:w-[340px]
           ${openPanel ? 'opacity-100 translate-y-0' : 'pointer-events-none opacity-0 translate-y-4'}`}
       >
       {/* Info Panel (Tide / Wind) */}
@@ -1543,6 +1581,7 @@ export default function App() {
       {/* 지역 바로가기. 누르면 그 구역으로 부드럽게 확대 이동한다.
           2단으로 쌓아 가로 폭을 줄이고, 최근 업데이트 바에 바짝 붙인다. */}
       <div
+        ref={dockRef}
         style={{ bottom: 'calc(3rem + env(safe-area-inset-bottom))' }}
         className="fixed left-0 right-0 z-40 px-2 overflow-x-auto"
       >
@@ -1576,7 +1615,7 @@ export default function App() {
           업무탭 할일(work_tasks)은 올리지 않는다(같은 날 사용자 지시). */}
       {appMode !== 'admin' && selectedShipId && ships[selectedShipId] && (
         <div
-          style={{ bottom: 'calc(3rem + 96px + env(safe-area-inset-bottom))' }}
+          style={{ bottom: 'calc(3rem + var(--dock-h, 4.5rem) + var(--sheet-h, 0px) + 1rem + env(safe-area-inset-bottom))' }}
           className="fixed left-1/2 -translate-x-1/2 z-40 bg-white/95 backdrop-blur rounded-2xl shadow-xl border border-gray-200 px-4 py-2.5 w-[min(92vw,380px)]"
         >
           <div className="flex items-center gap-3">
