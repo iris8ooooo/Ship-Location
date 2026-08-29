@@ -38,23 +38,36 @@ jobs:
         env:
           P: ${{ secrets.GCP_PROJECT_ID }}
         run: |
-          set -u
-          # 프로젝트 단위 권한 확인. 읽기 전용이고, 되돌아오는 건 권한 이름뿐이라
-          # 공개 로그에 남아도 안전하다.
-          PERMS=resourcemanager.projects.setIamPolicy,resourcemanager.projects.getIamPolicy,firebaserules.rulesets.test,firebaserules.rulesets.create,firebaserules.releases.update,firebaserules.releases.get
-          echo "=== 가진 권한 (없는 것은 아래 목록에 안 나온다) ==="
-          gcloud projects test-iam-permissions "$P" --permissions="$PERMS" --format='value(permissions)' || echo "(test-iam-permissions 자체가 거부됨)"
+          set -euo pipefail
+          # ★gcloud 에는 projects test-iam-permissions 서브커맨드가 없다(첫 시도가 여기서 깨졌다).
+          #   REST 로 직접 묻는다. 읽기 전용이고 되돌아오는 건 권한 이름뿐이다.
+          PERMS='["resourcemanager.projects.setIamPolicy","resourcemanager.projects.getIamPolicy","firebaserules.rulesets.test","firebaserules.rulesets.create","firebaserules.releases.update","firebaserules.releases.get"]'
+          TOKEN=$(gcloud auth print-access-token)
+
+          # 호출 자체가 실패하면 결론을 내지 않고 죽는다. 깨진 명령이 자신 있는 오답을
+          # 찍는 것이 이 프로젝트가 반복해서 당한 사고다.
+          BODY=$(curl -sS -f -X POST \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "{\"permissions\": $PERMS}" \
+            "https://cloudresourcemanager.googleapis.com/v1/projects/$P:testIamPermissions")
+
+          HAVE=$(printf '%s' "$BODY" | python3 -c 'import json,sys; print("\n".join(json.load(sys.stdin).get("permissions",[])))')
+
+          echo "=== 가진 권한 (물어본 6개 중) ==="
+          if [ -z "$HAVE" ]; then echo "(하나도 없음)"; else printf '%s\n' "$HAVE"; fi
 
           echo
           echo "=== 결론 ==="
-          HAVE=$(gcloud projects test-iam-permissions "$P" --permissions="$PERMS" --format='value(permissions)' 2>/dev/null || true)
           case "$HAVE" in
             *resourcemanager.projects.setIamPolicy*)
-              echo "SA 가 스스로 역할을 줄 수 있다 → 사용자에게 부탁할 필요 없음." ;;
+              echo "SA 가 스스로 역할을 줄 수 있다 → 사용자에게 부탁할 필요 없다." ;;
             *)
               echo "SA 는 스스로 역할을 줄 수 없다 → 사용자만 할 수 있는 일이 맞다." ;;
           esac
           case "$HAVE" in
-            *firebaserules.rulesets.test*) echo "룰 배포 권한은 이미 있다(?) — 403 원인이 다른 데 있다." ;;
-            *) echo "룰 배포 권한 없음 — 403 의 원인이 이것이 맞다." ;;
+            *firebaserules.rulesets.test*)
+              echo "룰 배포 권한은 이미 있다 → 403 원인이 다른 데 있다." ;;
+            *)
+              echo "룰 배포 권한 없음 → 403 의 원인이 이것이 맞다." ;;
           esac
