@@ -50,19 +50,54 @@ const HULL_RE = /^8\d{3}$/;
 /**
  * JSON 아무 데서나 "호선번호처럼 생긴 값" 과 "선석처럼 생긴 값" 을 함께 가진 객체를 행으로 본다.
  * 필드 이름을 모르고도 읽으려는 것이다 — 사내 API 의 필드명은 알 수 없고 바뀔 수도 있다.
+ *
+ * ★선석 필드는 "모양이 맞는 첫 필드" 로 고르면 안 된다 (2026-08-29 사고).
+ *  그렇게 했더니 레코드마다 똑같이 들어 있는 다른 필드를 집어 **14척 전부 "1안벽"** 이 됐고,
+ *  그대로 프로덕션에 써서 배 8척을 엉뚱한 데로 옮겼다.
+ *  선석은 배마다 달라야 한다 — 그래서 **레코드 사이에서 값이 가장 많이 갈리는 필드**를 고른다.
+ *  모든 레코드에서 같은 값인 필드는 정의상 그 배의 위치가 아니다.
  */
-function rowsFromJson(node, out = [], seen = new Set()) {
-  if (Array.isArray(node)) { for (const v of node) rowsFromJson(v, out, seen); return out; }
-  if (!node || typeof node !== 'object') return out;
-  let hull = null, loc = null;
-  for (const v of Object.values(node)) {
-    if (typeof v !== 'string' && typeof v !== 'number') continue;
-    const t = String(v).trim();
-    if (!hull && HULL_RE.test(t)) hull = t;
-    if (!loc && BERTH_RE.test(t)) loc = t;
+function rowsFromJson(node) {
+  // 1. 호선번호를 가진 레코드를 모으고, 선석꼴 값은 **필드 이름별로** 따로 담는다.
+  const recs = [];
+  (function walk(n) {
+    if (Array.isArray(n)) { for (const v of n) walk(v); return; }
+    if (!n || typeof n !== 'object') return;
+    let hull = null;
+    const cand = {};
+    for (const [k, v] of Object.entries(n)) {
+      if (typeof v !== 'string' && typeof v !== 'number') continue;
+      const t = String(v).trim();
+      if (!hull && HULL_RE.test(t)) hull = t;
+      if (BERTH_RE.test(t)) cand[k] = t.slice(0, 120);
+    }
+    if (hull && Object.keys(cand).length) recs.push({ hull, cand });
+    for (const v of Object.values(n)) walk(v);
+  })(node);
+  if (!recs.length) return [];
+
+  // 2. 필드마다 "값이 몇 가지로 갈리는지" 를 센다. 가장 많이 갈리는 필드가 선석이다.
+  const spread = new Map();
+  for (const r of recs) {
+    for (const [k, v] of Object.entries(r.cand)) {
+      if (!spread.has(k)) spread.set(k, new Set());
+      spread.get(k).add(v);
+    }
   }
-  if (hull && loc && !seen.has(hull)) { seen.add(hull); out.push({ hull, loc: loc.slice(0, 120) }); }
-  for (const v of Object.values(node)) rowsFromJson(v, out, seen);
+  const best = [...spread.entries()].sort((a, b) => b[1].size - a[1].size)[0];
+  if (!best) return [];
+  const [key, values] = best;
+  // 3. 그래도 한 가지 값뿐이면 그건 선석이 아니다. 읽지 못한 것으로 본다.
+  if (values.size < 2) return [];
+
+  const out = [];
+  const seen = new Set();
+  for (const r of recs) {
+    const loc = r.cand[key];
+    if (!loc || seen.has(r.hull)) continue;
+    seen.add(r.hull);
+    out.push({ hull: r.hull, loc });
+  }
   return out;
 }
 

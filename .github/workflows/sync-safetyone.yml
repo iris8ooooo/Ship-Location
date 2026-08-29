@@ -121,6 +121,8 @@ jobs:
       - name: Apply to Firestore
         if: steps.precheck.outputs.ready == 'true'
         run: |
+          # ★pipefail 이 없으면 tee 의 종료코드만 보게 돼 반영 실패가 초록불로 묻힌다.
+          set -o pipefail
           node scripts/sync-safetyone.mjs --input out/safetyone-list.json ${{ inputs.dry && '--dry' || '' }} | tee out/apply.log
           {
             echo "## 3중점검 수집 결과"
