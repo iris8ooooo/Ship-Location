@@ -21,6 +21,18 @@ jobs:
       contents: read
       id-token: write
     steps:
+      # ★이 스텝 앞에 요청을 두지 말 것 — 그러면 warm 을 재게 된다.
+      #  기존 "Cold start check" 는 바로 앞에서 여러 번 때린 뒤라 warm 만 쟀다.
+      #  콜드스타트는 이 계획에서 가장 큰 항목인데 아직 크기를 모른다.
+      #  ★쓸모 있으려면 조건이 있다: 최소 20분간 서비스 무트래픽 + 그 사이 배포 없음.
+      #  러너가 미국이라 절대값은 한국과 다르지만 COLD − min(WARM) 차분은 그대로 유효하다.
+      - name: Real cold start (must be the first request of the run)
+        run: |
+          curl -sS -o /dev/null -w 'COLD  ttfb=%{time_starttransfer} total=%{time_total}\n' "$URL/"
+          for i in 1 2 3; do
+            curl -sS -o /dev/null -w "WARM$i ttfb=%{time_starttransfer} total=%{time_total}\n" "$URL/"
+          done
+
       - name: Fetch index.html and the hashed assets it references
         run: |
           set -x
@@ -41,12 +53,6 @@ jobs:
               -w '[timing] raw_bytes=%{size_download}\n' "$URL$A"
           done
 
-      - name: Cold start check
-        run: |
-          # 방금 여러 번 때렸으니 인스턴스는 확실히 살아 있다 = warm 측정.
-          for i in 1 2 3; do
-            curl -sS -o /dev/null -w "warm$i ttfb=%{time_starttransfer} total=%{time_total}\n" "$URL/"
-          done
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
