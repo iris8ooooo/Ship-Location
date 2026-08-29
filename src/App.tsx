@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState, PointerEvent as ReactPointerEvent } from 'react';
 import { collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, addDoc, query, orderBy, limit } from 'firebase/firestore';
 import { parseListText, planMoves, BERTH_LABEL } from './lib/safetyone-match.mjs';
+import { fetchVesselPlan, dateLabel, type VesselPlan } from './lib/vessel-plan';
 import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User } from 'firebase/auth';
 import { db, auth } from './firebase';
 import YardMap, { YARD_REGIONS, YARD_HOME, YARD_W, YARD_H, YARD_ROTS,
@@ -119,6 +120,8 @@ export default function App() {
   const [syncPlan, setSyncPlan] = useState<import('./lib/safetyone-match.mjs').SyncPlan | null>(null);
   /** 마지막 수집 심장박동(meta/safetyone). 룰 배포 전이면 null 로 남아 숨는다. */
   const [lastSync, setLastSync] = useState<number | null>(null);
+  /** 뷰어 카드에 보여줄 "그 호선의 오늘"(공정관리 Supabase). 'loading'/'error' 구분. */
+  const [vesselPlan, setVesselPlan] = useState<VesselPlan | 'loading' | 'error' | null>(null);
   const [newShipColor, setNewShipColor] = useState('yellow');
   const [zoom, setZoom] = useState(1);
   const [appMode, setAppMode] = useState<'admin' | 'viewer'>('viewer');
@@ -612,6 +615,15 @@ export default function App() {
     attempt();
     return () => { stop = true; };
   }, [flyTo]);
+
+  // 뷰어 카드용 공정·할일 조회. 탭할 때마다가 아니라 선택이 바뀔 때 한 번(모듈에 5분 캐시).
+  useEffect(() => {
+    if (appMode === 'admin' || !selectedShipId) { setVesselPlan(null); return; }
+    let alive = true;
+    setVesselPlan('loading');
+    fetchVesselPlan(selectedShipId).then(p => { if (alive) setVesselPlan(p ?? 'error'); });
+    return () => { alive = false; };
+  }, [selectedShipId, appMode]);
 
   useEffect(() => {
     const historyRef = query(collection(db, 'history'), orderBy('timestamp', 'desc'), limit(10));
@@ -1549,36 +1561,76 @@ export default function App() {
         </div>
       </div>
 
-      {/* 뷰어에서 배를 탭하면 뜨는 카드. 선석·원문 위치와 공정관리비서 역링크.
-          역링크는 ?vessel= 딥링크로 그 호선의 탱크 시트가 바로 열린다. */}
+      {/* 뷰어에서 배를 탭하면 뜨는 카드 — 호선번호·3중점검 위치에 더해, 그 호선의
+          당일 공정과 할일을 공정관리비서(Supabase)에서 읽어 바로 보여준다.
+          공정관리 앱으로 진입하지 않는다(2026-08-29 사용자 지시). 노출 규칙은
+          "공정기준 -5일": 공정은 오늘 것 + 시작 D-5 이내, 할일은 날짜의 D-5 부터. */}
       {appMode !== 'admin' && selectedShipId && ships[selectedShipId] && (
         <div
           style={{ bottom: 'calc(3rem + 96px + env(safe-area-inset-bottom))' }}
-          className="fixed left-1/2 -translate-x-1/2 z-40 bg-white/95 backdrop-blur rounded-2xl shadow-xl border border-gray-200 pl-4 pr-2 py-2 flex items-center gap-3 max-w-[92vw]"
+          className="fixed left-1/2 -translate-x-1/2 z-40 bg-white/95 backdrop-blur rounded-2xl shadow-xl border border-gray-200 px-4 py-2.5 w-[min(92vw,380px)]"
         >
-          <div className="min-w-0">
-            <div className="font-black text-gray-900 leading-tight">{selectedShipId}</div>
-            {(ships[selectedShipId] as any).berth && (
-              <div className="text-xs text-gray-600 truncate max-w-[40vw]">
-                {(ships[selectedShipId] as any).loc ?? (ships[selectedShipId] as any).berth}
-              </div>
+          <div className="flex items-center gap-3">
+            <div className="min-w-0 flex-1">
+              <div className="font-black text-gray-900 leading-tight">{selectedShipId}</div>
+              {(ships[selectedShipId] as any).berth && (
+                <div className="text-xs text-gray-600 truncate">
+                  {(ships[selectedShipId] as any).loc ?? (ships[selectedShipId] as any).berth}
+                </div>
+              )}
+            </div>
+            <button
+              onClick={() => setSelectedShipId(null)}
+              aria-label="닫기"
+              className="shrink-0 w-8 h-8 rounded-full text-gray-400 hover:bg-gray-100 flex items-center justify-center"
+            >
+              <X size={18} />
+            </button>
+          </div>
+          <div className="mt-1.5 max-h-[38vh] overflow-y-auto text-[13px] leading-snug space-y-1.5">
+            {vesselPlan === 'loading' && <div className="text-gray-400">공정 일정 불러오는 중…</div>}
+            {vesselPlan === 'error' && <div className="text-gray-400">공정관리 연결 실패 — 위치만 표시</div>}
+            {vesselPlan && typeof vesselPlan === 'object' && (
+              <>
+                {vesselPlan.today.length > 0 && (
+                  <div>
+                    <div className="text-[11px] font-bold text-blue-700">오늘 공정</div>
+                    {vesselPlan.today.map((it, i) => (
+                      <div key={i} className="text-gray-800 truncate">{it.label}</div>
+                    ))}
+                  </div>
+                )}
+                {vesselPlan.upcoming.length > 0 && (
+                  <div>
+                    <div className="text-[11px] font-bold text-teal-700">다가오는 공정</div>
+                    {vesselPlan.upcoming.map((it, i) => (
+                      <div key={i} className="text-gray-800 truncate">
+                        <span className="font-bold text-teal-700">D-{it.dday}</span> {it.label} <span className="text-gray-400">{it.date ? dateLabel(it.date) : ''}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {vesselPlan.todos.length > 0 && (
+                  <div>
+                    <div className="text-[11px] font-bold text-amber-700">할일</div>
+                    {vesselPlan.todos.map((it, i) => (
+                      <div key={i} className="text-gray-800 truncate">
+                        {it.dday !== null && (
+                          <span className={`font-bold ${it.dday < 0 ? 'text-red-600' : 'text-amber-700'}`}>
+                            {it.dday < 0 ? `D+${-it.dday}` : `D-${it.dday}`}{' '}
+                          </span>
+                        )}
+                        {it.label} {it.date && <span className="text-gray-400">{dateLabel(it.date)}</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {vesselPlan.today.length + vesselPlan.upcoming.length + vesselPlan.todos.length === 0 && (
+                  <div className="text-gray-400">오늘 공정·할일 없음</div>
+                )}
+              </>
             )}
           </div>
-          <a
-            href={`https://lng-pump-tower-process-manager.vercel.app/?vessel=${selectedShipId}`}
-            target="_blank"
-            rel="noreferrer"
-            className="shrink-0 px-3 py-1.5 rounded-full bg-blue-600 text-white text-sm font-bold no-underline active:scale-95 transition-all"
-          >
-            공정관리
-          </a>
-          <button
-            onClick={() => setSelectedShipId(null)}
-            aria-label="닫기"
-            className="shrink-0 w-8 h-8 rounded-full text-gray-400 hover:bg-gray-100 flex items-center justify-center"
-          >
-            <X size={18} />
-          </button>
         </div>
       )}
 
