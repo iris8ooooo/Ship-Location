@@ -108,6 +108,53 @@ function rowsFromJson(node) {
 }
 
 /**
+ * ★배 레이어에서 읽는 것은 **선석 이름이 아니라 좌표**다 (2026-08-29 스키마 실측).
+ *
+ *  `/gis/ships` 를 실제로 열어 보니 선석 이름 필드가 아예 없었다. 있는 것은
+ *  `shipno`(호선 23개, 전부 다름)와 `x`·`y`·`angle`·`rotation`·`length`·`width` —
+ *  지도가 배를 그리는 바로 그 값이다. 지도가 <canvas> 인 것도 같은 이유다:
+ *  세이프티원은 "이 배는 2안벽" 이라고 말하지 않고 "좌표 (x,y) 에 각도 θ 로 그린다"
+ *  고 말한다.
+ *
+ *  그래서 선석 문자열을 찾던 rowsFromJson 은 배 레이어에 대해 0행을 냈고, run 13 이
+ *  "호선+선석을 함께 가진 객체가 3건 미만" 으로 실패했다. 찾는 것이 없었던 것이다.
+ *
+ *  객체 판정은 이름이 아니라 값으로 한다 — 호선번호꼴 값을 갖고 x·y 가 숫자면 배다.
+ *  필드명이 바뀌어도 따라간다.
+ */
+function shipsFromLayer(node) {
+  const num = v => {
+    if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+    if (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v))) return Number(v);
+    return null;
+  };
+  const out = [];
+  const seen = new Set();
+  (function walk(n) {
+    if (Array.isArray(n)) { for (const v of n) walk(v); return; }
+    if (!n || typeof n !== 'object') return;
+    let hull = null;
+    for (const v of Object.values(n)) {
+      if ((typeof v === 'string' || typeof v === 'number') && HULL_RE.test(String(v).trim())) {
+        hull = String(v).trim();
+        break;
+      }
+    }
+    const x = num(n.x), y = num(n.y);
+    if (hull && x !== null && y !== null && !seen.has(hull)) {
+      seen.add(hull);
+      out.push({
+        hull, x, y,
+        angle: num(n.angle), rotation: num(n.rotation),
+        length: num(n.length), width: num(n.width),
+      });
+    }
+    for (const v of Object.values(n)) walk(v);
+  })(node);
+  return out;
+}
+
+/**
  * 응답의 **스키마만** 뽑는다 — 필드 이름, 나온 횟수, 값이 몇 가지로 갈리는지,
  * 그리고 선석꼴로 시작하는 값이 몇 개인지. **값 자체는 담지 않는다**(공개 로그).
  * 어느 필드가 선석인지 눈으로 확정하려는 것이다 — 더는 추측하지 않는다.
@@ -407,10 +454,13 @@ for (let i = 0; i < 50 && !(await anyRows()); i++) await page.waitForTimeout(500
 // ① 지도 배 레이어에서만 읽는다. 다른 응답은 배 위치표가 아니다.
 let rows = [];
 let source = 'DOM';
+/** 'coords' = 배 레이어의 지도 좌표 / 'loc' = DOM 리스트의 위치 문자열. 반영 쪽이 이걸 보고 갈린다. */
+let kind = 'loc';
 if (shipsLayer) {
-  rows = rowsFromJson(shipsLayer);
+  rows = shipsFromLayer(shipsLayer);
+  kind = 'coords';
   source = `지도 배 레이어 ${SHIPS_LAYER}`;
-  console.log(`지도 배 레이어에서 읽음 — ${rows.length}척`);
+  console.log(`지도 배 레이어에서 읽음 — ${rows.length}척 (좌표)`);
   console.log('----- 배 레이어 스키마 (값 없음, 이름·개수만) -----');
   console.log(JSON.stringify(fieldShape(shipsLayer), null, 1));
   console.log('----- 끝 -----');
@@ -420,7 +470,9 @@ if (shipsLayer) {
 
 // ② API 로 못 읽었으면 DOM 을 훑는다(예전 경로 — 표 화면을 열어 둔 경우).
 if (rows.length < 5) {
-  const seenHull = new Set(rows.map(r => r.hull));
+  kind = 'loc';
+  rows = [];
+  const seenHull = new Set();
   for (const f of page.frames()) {
     let got = [];
     try { got = await rowsFrom(f); } catch { /* 접근 못 하는 프레임은 넘긴다 */ }
@@ -431,8 +483,8 @@ if (rows.length < 5) {
 // 야드엔 보통 20척 이상 있다. 몇 척 안 잡혔으면 리스트가 안 펼쳐진 것이다.
 if (rows.length < 5) await bail(`행을 ${rows.length}개밖에 못 읽었다 — 리스트가 안 펼쳐졌거나 화면 구조가 바뀌었다`);
 
-writeFileSync(outPath, JSON.stringify({ capturedAt: new Date().toISOString(), rows }, null, 1));
-console.log(`호선 ${rows.length}척 수집 (${source}) → ${outPath}`);
+writeFileSync(outPath, JSON.stringify({ capturedAt: new Date().toISOString(), kind, rows }, null, 1));
+console.log(`호선 ${rows.length}척 수집 (${source}, ${kind}) → ${outPath}`);
 // ★성공해도 진단을 남긴다. 실패할 때만 보이면 "그럴듯하게 틀린" 수집을 못 잡는다.
 //  실제로 그렇게 두 번 놓쳤다(전부 1안벽 / 작업내용 필드).
 console.log('----- 어느 응답에 무엇이 있었나 (값 없음, 이름·개수만) -----');
