@@ -107,6 +107,33 @@ function rowsFromJson(node) {
   return out;
 }
 
+/**
+ * 응답의 **스키마만** 뽑는다 — 필드 이름, 나온 횟수, 값이 몇 가지로 갈리는지,
+ * 그리고 선석꼴로 시작하는 값이 몇 개인지. **값 자체는 담지 않는다**(공개 로그).
+ * 어느 필드가 선석인지 눈으로 확정하려는 것이다 — 더는 추측하지 않는다.
+ */
+function fieldShape(node) {
+  const stat = new Map();
+  (function walk(n) {
+    if (Array.isArray(n)) { for (const v of n) walk(v); return; }
+    if (!n || typeof n !== 'object') return;
+    for (const [k, v] of Object.entries(n)) {
+      if (typeof v === 'string' || typeof v === 'number') {
+        if (!stat.has(k)) stat.set(k, { n: 0, vals: new Set(), berth: 0, hull: 0 });
+        const t = stat.get(k), sv = String(v).trim();
+        t.n++; if (t.vals.size < 200) t.vals.add(sv);
+        if (BERTH_RE.test(sv)) t.berth++;
+        if (HULL_RE.test(sv)) t.hull++;
+      } else walk(v);
+    }
+  })(node);
+  return [...stat.entries()]
+    .map(([k, t]) => ({ 필드: k, 나온횟수: t.n, 값종류: t.vals.size, 선석꼴: t.berth, 호선번호꼴: t.hull }))
+    .filter(f => f.선석꼴 || f.호선번호꼴 || f.값종류 > 1)
+    .sort((a, b) => b.선석꼴 - a.선석꼴 || b.호선번호꼴 - a.호선번호꼴)
+    .slice(0, 25);
+}
+
 const netlog = [];
 const trace = [];
 /**
@@ -134,7 +161,7 @@ page.on('response', async (res) => {
         if (rows.length >= 3) {
           // 한 배에 한 줄인 응답을 고른다. 점검 이력처럼 호선당 수십 줄인 응답은
           // 같은 호선이 여러 번 나와 "호선번호수/행수" 가 크다 — 그건 위치 원본이 아니다.
-          apiCands.push({ path: rec.path, rows, 반복도: rec.호선번호수 / rows.length });
+          apiCands.push({ path: rec.path, rows, 반복도: rec.호선번호수 / rows.length, 필드: fieldShape(json) });
           rec.읽힌행 = rows.length;
         }
       }
@@ -382,5 +409,14 @@ if (rows.length < 5) await bail(`행을 ${rows.length}개밖에 못 읽었다 �
 
 writeFileSync(outPath, JSON.stringify({ capturedAt: new Date().toISOString(), rows }, null, 1));
 console.log(`호선 ${rows.length}척 수집 (${source}) → ${outPath}`);
+// ★성공해도 진단을 남긴다. 실패할 때만 보이면 "그럴듯하게 틀린" 수집을 못 잡는다.
+//  실제로 그렇게 두 번 놓쳤다(전부 1안벽 / 작업내용 필드).
+console.log('----- 어느 응답에 무엇이 있었나 (값 없음, 이름·개수만) -----');
+console.log(JSON.stringify({
+  주고받은JSON: netlog.filter(r => r.bytes > 0),
+  후보: apiCands.map(c => ({ path: c.path, 행: c.rows.length, 반복도: Number(c.반복도.toFixed(1)), 필드: c.필드 })),
+  고른것: source,
+}, null, 1));
+console.log('----- 끝 -----');
 await browser.close();
 process.exit(0);
