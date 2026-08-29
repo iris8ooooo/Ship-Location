@@ -1549,8 +1549,9 @@ export default function App() {
         </div>
       </div>
 
-      {/* 뷰어에서 배를 탭하면 뜨는 카드. 선석·원문 위치와 공정관리비서 역링크.
-          역링크는 ?vessel= 딥링크로 그 호선의 탱크 시트가 바로 열린다. */}
+      {/* 뷰어에서 배를 탭하면 뜨는 카드 — 호선번호와 3중점검 원문 위치.
+          공정관리비서 역링크 버튼은 사용자 지시로 보류(2026-08-29). LNG 앱의
+          ?vessel= 딥링크 자체는 살아 있으니 다시 붙일 땐 버튼만 되살리면 된다. */}
       {appMode !== 'admin' && selectedShipId && ships[selectedShipId] && (
         <div
           style={{ bottom: 'calc(3rem + 96px + env(safe-area-inset-bottom))' }}
@@ -1564,14 +1565,6 @@ export default function App() {
               </div>
             )}
           </div>
-          <a
-            href={`https://lng-pump-tower-process-manager.vercel.app/?vessel=${selectedShipId}`}
-            target="_blank"
-            rel="noreferrer"
-            className="shrink-0 px-3 py-1.5 rounded-full bg-blue-600 text-white text-sm font-bold no-underline active:scale-95 transition-all"
-          >
-            공정관리
-          </a>
           <button
             onClick={() => setSelectedShipId(null)}
             aria-label="닫기"
