@@ -88,26 +88,23 @@ interface TideInfo {
  *  1초는 배를 여러 척 옮길 때 답답하고, 300ms 대는 핀치가 시작되는 구간과 겹친다.
  *  600ms 면 실수로 눌릴 일은 없으면서 "꾹" 한 번으로 잡힌다. */
 /**
- * 호선번호 라벨의 회전각(선체 기준).
+ * 호선번호 라벨을 어떻게 놓을지 정한다 (선체 기준 회전각 + 한 자씩 쌓을지).
  *
- * 글자는 반드시 선체 긴 방향을 따라가야 한다 — 선체 폭이 26px 뿐이라 가로로 두면
- * 밖으로 삐져나간다. 그래서 선택지는 -90 과 +90 둘뿐이고, 어느 쪽을 고르느냐가
- * 화면에서 글자가 어느 방향으로 읽히느냐를 정한다.
+ * 선체는 26px 폭에 130px 길이다. 화면에서 선체가 가로로 누우면 글자도 눕혀
+ * 한 줄로 쓰면 되지만, 선체가 세로로 서면 한 줄짜리 글자가 26px 폭을 뚫고 나간다.
  *
- * 규칙 두 개 (2026-08-29 사용자 확인):
- *   1. 가로로 눕는 쪽이 있으면 그쪽 — 가로 글씨가 제일 읽기 쉽다.
- *   2. 어차피 세로면 **첫 숫자가 위**로 간다. 화면 기준 +90 이 그 방향이다
- *      (실측: rotate(90deg) 는 위→아래로 읽히고, -90 은 아래→위로 읽힌다).
- *      회전을 어느 방향으로 돌리든 이 규칙은 같다.
+ * ★세로일 때는 글자를 눕히지 않는다 (2026-08-29 사용자 지시).
+ *   한 자씩 **똑바로 세워 위에서 아래로 쌓는다** — 8300 이면 8 / 3 / 0 / 0.
+ *   앞서 rotate(90deg) 로 글자를 눕혀 세로로 읽게 한 것은 잘못 이해한 것이었다.
+ *   쌓을 때 라벨의 화면각은 0 이어야 글자가 똑바로 선다 → 선체 각도를 그대로 되돌린다.
+ *
+ * 배·구역 회전은 전부 90도 단위라(handleRotate) 화면각은 0/90/180/270 중 하나다.
  */
-function hullLabelRot(shipR: number, rot: number) {
-  const norm = (a: number) => (((a % 360) + 540) % 360) - 180;   // (-180, 180]
-  const a = shipR + rot;                    // 선체의 화면상 각도
-  // 1. 화면에서 가로(0도)로 눕는 쪽이 있으면 그쪽.
-  if (norm(a - 90) === 0) return -90;
-  if (norm(a + 90) === 0) return 90;
-  // 2. 세로다 — 화면각이 +90(첫 숫자 위)이 되는 쪽을 고른다.
-  return norm(a + 90) === 90 ? 90 : -90;
+function hullLabel(shipR: number, rot: number): { rot: number; stack: boolean } {
+  const a = ((Math.round((shipR + rot) / 90) * 90) % 360 + 360) % 360;   // 선체의 화면각
+  if (a === 90) return { rot: -90, stack: false };    // 선체가 가로 — 글자도 눕힌다
+  if (a === 270) return { rot: 90, stack: false };
+  return { rot: -a, stack: true };                    // 선체가 세로 — 한 자씩 쌓는다
 }
 
 const DRAG_HOLD_MS = 600;
@@ -1719,6 +1716,7 @@ export default function App() {
             // 공정일정에 없는 배 = 우리가 안 붙는 배. 물러나게 한다.
             // 명부를 못 읽었으면 working 이 비어 있고, 그때는 아무도 안 흐려진다.
             const isDim = roster.working.size > 0 && !roster.working.has(id);
+            const label = hullLabel(ship.r, rot);
             
             return (
               <div
@@ -1763,13 +1761,19 @@ export default function App() {
                     것이지 움직이는 중이 아니고, 25척이 각자 60fps 로 애니메이션을
                     돌리면 계속 리페인트가 일어나 폰이 뜨거워진다. */}
 
-                {/* 호선번호. 선체가 좁아(26px) 글자를 가로로 두면 안 들어가므로
-                    라벨을 눕혀 선체 방향으로 한 줄에 읽히게 한다(세이프티원과 같은 방식). */}
+                {/* 호선번호. 선체가 좁아(26px) 가로 한 줄로는 안 들어간다.
+                    선체가 누웠으면 글자도 눕히고, 섰으면 한 자씩 똑바로 쌓는다. */}
                 <div
                   className={`z-10 text-[26px] font-black drop-shadow-md ${isGreen ? 'text-white' : 'text-gray-900'}`}
-                  style={{ transform: `rotate(${hullLabelRot(ship.r, rot)}deg)` }}
+                  style={{ transform: `rotate(${label.rot}deg)` }}
                 >
-                  <div className="tracking-wider whitespace-nowrap">{id}</div>
+                  {label.stack ? (
+                    <div className="flex flex-col items-center leading-[0.85]">
+                      {[...id].map((ch, i) => <span key={i}>{ch}</span>)}
+                    </div>
+                  ) : (
+                    <div className="tracking-wider whitespace-nowrap">{id}</div>
+                  )}
                 </div>
 
                 {/* Memo Display */}
