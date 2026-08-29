@@ -38,6 +38,28 @@ const browser = await chromium.launch(
   process.env.PW_EXECUTABLE_PATH ? { executablePath: process.env.PW_EXECUTABLE_PATH } : {});
 const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
 
+// ── 스스로 진단하기 ───────────────────────────────────────────────────────
+// 5번 고쳐도 리스트를 못 읽었다. 추측을 멈추고 **어디서 데이터가 오는지**를 기록한다.
+// SPA 가 JSON API 를 부르고 있다면 DOM 을 긁을 게 아니라 그 API 를 부르는 게 맞다.
+// 기록하는 건 구조뿐이다: 메서드·경로(쿼리 제외)·상태·바이트수, 그리고 응답 안에
+// 호선번호/선석이 **몇 개** 들어 있는지. 내용은 담지 않는다(공개 로그).
+const BERTH_G = /(1도크|2도크|1안벽|2안벽|1돌핀|2돌핀|플로팅|1BERTH|시운전|출항|해상)/g;
+const netlog = [];
+const trace = [];
+page.on('response', async (res) => {
+  const req = res.request();
+  if (!['xhr', 'fetch'].includes(req.resourceType())) return;
+  let u; try { u = new URL(res.url()); } catch { return; }
+  const rec = { method: req.method(), path: u.origin + u.pathname, status: res.status() };
+  try {
+    const body = await res.text();
+    rec.bytes = body.length;
+    rec.호선번호수 = (body.match(/(^|[^0-9])8\d{3}([^0-9]|$)/g) || []).length;
+    rec.선석수 = (body.match(BERTH_G) || []).length;
+  } catch { rec.bytes = -1; }
+  netlog.push(rec);
+});
+
 /**
  * 죽기 전에 화면 "구조" 만 남긴다 — 글자는 담지 않는다(공개 로그·아티팩트라서).
  * 다음 세션이 이 뼈대를 보고 셀렉터를 고친다.
@@ -111,7 +133,15 @@ async function bail(reason) {
       try { frames.push(await skeletonOf(f)); }
       catch (e) { frames.push({ url: '(접근 불가)', error: String(e).slice(0, 120) }); }
     }
-    const dump = { reason, frameCount: page.frames().length, frames };
+    const dump = {
+      reason,
+      눌러본것: trace,
+      // ★여기가 핵심 단서다. 호선번호수·선석수가 큰 응답이 있으면 그게 데이터 API 다.
+      //  그러면 DOM 을 긁을 게 아니라 그 경로를 직접 부르면 된다.
+      주고받은JSON: netlog.filter(r => r.bytes !== 0).slice(-25),
+      frameCount: page.frames().length,
+      frames,
+    };
     writeFileSync(`${dirname(outPath)}/skeleton.json`, JSON.stringify(dump, null, 1));
     // ★로그에도 그대로 찍는다. 글자가 없으니 공개돼도 안전하고, 아티팩트를 내려받지
     //  못하는 환경(원격 세션)에서도 다음 세션이 바로 읽고 고칠 수 있다.
@@ -215,28 +245,30 @@ async function anyRows() {
  * 그래서 제목을 뺀 후보를 먼저 시도하고, 없을 때만 전체를 본다.
  */
 const NOT_PANEL = 'button:not(.v-expansion-panel-title), a, [role="tab"], [role="button"], input[type="button"], input[type="submit"]';
-async function clickNamed(re) {
+async function clickNamed(re, step) {
+  let tried = 0, clicked = 0;
   for (const f of page.frames()) {
-    for (const sel of [NOT_PANEL, CLICKABLE]) {
-      const el = f.locator(sel).filter({ hasText: re }).first();
-      try {
-        if (await el.count() === 0) continue;
-        await el.click({ timeout: 4000 });
-        return true;
-      } catch { /* 안 눌리면 다음 후보 */ }
+    const els = f.locator(NOT_PANEL).filter({ hasText: re });
+    const n = await els.count().catch(() => 0);
+    for (let i = 0; i < n && clicked === 0; i++) {
+      const el = els.nth(i);
+      if (!await el.isVisible().catch(() => false)) continue;   // 숨은 것 누르면 안 눌린다
+      tried++;
+      try { await el.click({ timeout: 4000 }); clicked++; } catch { /* 다음 후보 */ }
     }
   }
-  return false;
+  trace.push({ step, 후보: tried, 눌림: clicked });
+  return clicked > 0;
 }
 
 await page.waitForLoadState('networkidle').catch(() => {});
 
 // 이미 3중점검 화면이면(router-link-exact-active) 누를 필요가 없지만, 아니면 눌러 들어간다.
-if (!await anyRows()) { await clickNamed(/3중점검|삼중점검/); await page.waitForTimeout(1500); }
-// 조회 — 이게 핵심이다. 누르지 않으면 표가 비어 있다.
-if (!await anyRows()) { await clickNamed(/조회|검색/); await page.waitForTimeout(1500); }
-// 기본이 지도 화면이면 표는 "리스트/목록" 을 눌러야 나온다.
-if (!await anyRows()) { await clickNamed(/리스트|목록/); await page.waitForTimeout(1500); }
+for (const [step, re] of [['3중점검', /3중점검|삼중점검/], ['조회', /조회|검색/], ['리스트', /리스트|목록/]]) {
+  if (await anyRows()) { trace.push({ step, 건너뜀: '이미 행이 보임' }); break; }
+  await clickNamed(re, step);
+  await page.waitForTimeout(1500);
+}
 
 // 조회 응답이 늦을 수 있다. 행이 보일 때까지 최대 25초 기다린다.
 for (let i = 0; i < 50 && !(await anyRows()); i++) await page.waitForTimeout(500);
