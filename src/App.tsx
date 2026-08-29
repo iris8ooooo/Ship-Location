@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState, PointerEvent as ReactPointerEvent } from 'react';
 import { collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, addDoc, query, orderBy, limit } from 'firebase/firestore';
+import { parseListText, planMoves, BERTH_LABEL } from './lib/safetyone-match.mjs';
 import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User } from 'firebase/auth';
 import { db, auth } from './firebase';
 import YardMap, { YARD_REGIONS, YARD_HOME, YARD_W, YARD_H, YARD_ROTS,
@@ -112,6 +113,12 @@ export default function App() {
   const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
   const [isAddingZone, setIsAddingZone] = useState(false);
   const [newShipName, setNewShipName] = useState('');
+  /** 3중점검 리스트 붙여넣기 반영. 계획을 먼저 보여주고 확인 후에만 쓴다. */
+  const [syncText, setSyncText] = useState('');
+  const [syncOpen, setSyncOpen] = useState(false);
+  const [syncPlan, setSyncPlan] = useState<import('./lib/safetyone-match.mjs').SyncPlan | null>(null);
+  /** 마지막 수집 심장박동(meta/safetyone). 룰 배포 전이면 null 로 남아 숨는다. */
+  const [lastSync, setLastSync] = useState<number | null>(null);
   const [newShipColor, setNewShipColor] = useState('yellow');
   const [zoom, setZoom] = useState(1);
   const [appMode, setAppMode] = useState<'admin' | 'viewer'>('viewer');
@@ -556,6 +563,56 @@ export default function App() {
     }
   }, []);
 
+  // 수집 심장박동. 문서가 없거나 룰이 아직 안 열렸으면 조용히 숨긴다.
+  useEffect(() => {
+    const unsub = onSnapshot(doc(db, 'meta', 'safetyone'),
+      snap => setLastSync(snap.exists() ? ((snap.data() as any).lastSuccess ?? null) : null),
+      () => setLastSync(null));
+    return () => unsub();
+  }, []);
+
+  // ?hull=8300 딥링크 — 공정관리비서 앱에서 배지를 누르면 이 주소로 들어온다.
+  // 배 데이터가 도착한 뒤 한 번만 그 배로 날아가 깜빡여 준다.
+  // ★ships 변화에만 기대면 안 된다 — 이름 입력 화면이 떠 있는 동안 데이터가
+  //  먼저 다 도착하면, 뷰포트가 나중에 생겨도 다시 깨울 이벤트가 없다(실측).
+  //  그래서 준비될 때까지 짧게 재시도한다.
+  const deepLinkRef = useRef<string | null>(new URLSearchParams(window.location.search).get('hull'));
+  const shipsRef = useRef(ships);
+  useEffect(() => { shipsRef.current = ships; }, [ships]);
+  useEffect(() => {
+    if (!deepLinkRef.current) return;
+    let stop = false, tries = 0;
+    const attempt = () => {
+      if (stop) return;
+      const hull = deepLinkRef.current;
+      if (!hull) return;
+      const ship = (shipsRef.current as Record<string, ShipData>)[hull];
+      if (!ship || !viewportRef.current) {
+        if (tries++ < 50) setTimeout(attempt, 400);   // 최대 20초 — 없는 호선이면 포기
+        return;
+      }
+      deepLinkRef.current = null;
+      go(hull, ship);
+    };
+    const go = (hull: string, ship: ShipData) => {
+      flyTo({ id: 'deeplink', label: hull, x: ship.x - 110, y: ship.y - 110, w: 220, h: 220, fit: 0.9 });
+      setTimeout(() => {
+        const el = document.getElementById(`ship-${hull}`)?.querySelector('.ship') as HTMLElement | null;
+        if (!el) return;
+        el.style.outline = '4px solid #2563eb';
+        el.style.outlineOffset = '3px';
+        el.style.transition = 'outline-color 0.35s';
+        let n = 0;
+        const iv = setInterval(() => {
+          el.style.outlineColor = n % 2 ? '#2563eb' : 'transparent';
+          if (++n > 6) { clearInterval(iv); el.style.outline = ''; el.style.outlineOffset = ''; el.style.transition = ''; }
+        }, 350);
+      }, 750);
+    };
+    attempt();
+    return () => { stop = true; };
+  }, [flyTo]);
+
   useEffect(() => {
     const historyRef = query(collection(db, 'history'), orderBy('timestamp', 'desc'), limit(10));
     const unsubscribe = onSnapshot(historyRef, (snapshot) => {
@@ -681,6 +738,45 @@ export default function App() {
       });
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'history');
+    }
+  };
+
+  /** 3중점검 텍스트 → 이동 계획. 화면에 보여만 주고 아직 아무것도 안 쓴다. */
+  const previewSync = () => {
+    const { rows } = parseListText(syncText);
+    if (!rows.length) { setSyncPlan(null); return; }
+    setSyncPlan(planMoves(rows, new Map(Object.entries(ships))));
+  };
+
+  /** 계획 적용. 선석이 바뀐 배만 옮기고 history 에 남긴다. */
+  const applySync = async () => {
+    if (!syncPlan) return;
+    const now = Date.now();
+    try {
+      for (const item of [...syncPlan.moves, ...syncPlan.creates]) {
+        const cur = (ships as Record<string, any>)[item.hull];
+        const pos = { x: item.to.x, y: item.to.y, r: item.to.r };
+        // berth·loc·syncedAt 는 공정관리비서 연동용. 룰이 추가 필드를 막으면
+        // 거부되므로, 그때는 좌표만이라도 쓴다. 기존 배는 부분 갱신 — 문서를
+        // 통째로 갈아끼우면 좌표 밖 필드까지 건드려 룰에 걸리고 데이터도 잃는다.
+        const extra = { berth: BERTH_LABEL[item.berth], loc: item.loc, syncedAt: now };
+        if (cur) {
+          try { await updateDoc(doc(db, 'ships', item.hull), { ...pos, ...extra }); }
+          catch { await updateDoc(doc(db, 'ships', item.hull), pos); }
+        } else {
+          try { await setDoc(doc(db, 'ships', item.hull), { ...pos, color: 'yellow', memo: '', ...extra }); }
+          catch { await setDoc(doc(db, 'ships', item.hull), { ...pos, color: 'yellow', memo: '' }); }
+        }
+        logAction(`${BERTH_LABEL[item.berth]}(으)로 이동 — 3중점검`, item.hull);
+      }
+      // 수집 심장박동 — 룰의 meta 항목이 배포되기 전이면 조용히 실패한다.
+      setDoc(doc(db, 'meta', 'safetyone'), {
+        lastSuccess: now, rows: syncPlan.moves.length + syncPlan.creates.length + syncPlan.skips.length,
+        moved: syncPlan.moves.length, created: syncPlan.creates.length, unknown: syncPlan.unknown.length,
+      }).catch(() => {});
+      setSyncText(''); setSyncPlan(null); setSyncOpen(false);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, 'ships');
     }
   };
 
@@ -1165,6 +1261,17 @@ export default function App() {
         >
           <div className="flex items-center gap-2">
             <h4 className="font-bold text-sm text-gray-800">최근 업데이트</h4>
+            {lastSync !== null && (() => {
+              // "3시간째 그대로" 와 "수집이 죽음" 이 구분돼야 한다. 4시간 넘게
+              // 심장박동이 없으면 빨갛게 — 세이프티원 갱신 주기(2~3시간)보다 길다.
+              const mins = Math.floor((Date.now() - lastSync) / 60000);
+              const label = mins < 60 ? `${mins}분 전` : `${Math.floor(mins / 60)}시간 전`;
+              return (
+                <span className={`text-[10px] px-1.5 py-0.5 rounded-full whitespace-nowrap ${mins > 240 ? 'bg-red-100 text-red-700' : 'bg-teal-50 text-teal-700'}`}>
+                  3중점검 {label}
+                </span>
+              );
+            })()}
             {!isHistoryOpen && history.length > 0 && (
               <span className="text-xs text-gray-600 truncate max-w-[200px] sm:max-w-xs">
                 <span className="font-bold text-blue-600">{history[0].author}</span>님이 <span className="font-semibold">{history[0].shipId}</span>호 {history[0].action}
@@ -1333,6 +1440,61 @@ export default function App() {
           >
             {isAddingZone ? '영역 추가 취소' : '마그네틱 영역 추가'}
           </button>
+
+          {/* 3중점검 리스트 붙여넣기 반영. 계획을 보여주고 확인해야만 쓴다 —
+              선석이 바뀐 배만 옮기고 같은 선석이면 손대지 않는다. */}
+          <button
+            onClick={() => { setSyncOpen(o => !o); setSyncPlan(null); }}
+            className={`col-span-2 md:col-span-1 px-3 py-2 text-sm sm:text-base font-bold rounded transition-colors ${syncOpen ? 'bg-gray-400 text-white' : 'bg-teal-600 hover:bg-teal-700 text-white'}`}
+          >
+            {syncOpen ? '3중점검 붙여넣기 닫기' : '3중점검 붙여넣기'}
+          </button>
+          {syncOpen && (
+            <div className="col-span-2 md:col-span-1 flex flex-col gap-2">
+              <textarea
+                value={syncText}
+                onChange={e => { setSyncText(e.target.value); setSyncPlan(null); }}
+                rows={5}
+                placeholder={'세이프티원 3중점검 리스트 보기를 복사해 그대로 붙여넣기\n(호선번호와 위치가 든 줄이면 표 전체여도 된다)'}
+                className="p-2 text-sm border border-gray-300 rounded w-full text-gray-800 font-mono"
+              />
+              {syncPlan && (
+                <div className="text-xs text-gray-700 max-h-36 overflow-y-auto border border-gray-200 rounded p-2 bg-gray-50 space-y-0.5">
+                  {syncPlan.moves.map(m => (
+                    <div key={m.hull}>이동 <b>{m.hull}</b> → {BERTH_LABEL[m.berth]}</div>
+                  ))}
+                  {syncPlan.creates.map(m => (
+                    <div key={m.hull}>추가 <b>{m.hull}</b> → {BERTH_LABEL[m.berth]}</div>
+                  ))}
+                  {syncPlan.unknown.map(u => (
+                    <div key={u.hull} className="text-red-600">해석 실패 {u.hull} "{u.loc}"</div>
+                  ))}
+                  <div className="text-gray-500 pt-1">
+                    그대로 {syncPlan.skips.length} · 시운전/출항 {syncPlan.sea.length} · 리스트 밖(안 건드림) {syncPlan.untouched.length}
+                  </div>
+                </div>
+              )}
+              {!syncPlan ? (
+                <button
+                  onClick={previewSync}
+                  disabled={!syncText.trim()}
+                  className="px-3 py-2 text-sm font-bold rounded bg-blue-500 hover:bg-blue-600 text-white disabled:bg-gray-300"
+                >
+                  미리보기
+                </button>
+              ) : (
+                <button
+                  onClick={applySync}
+                  disabled={!syncPlan.moves.length && !syncPlan.creates.length}
+                  className="px-3 py-2 text-sm font-bold rounded bg-teal-600 hover:bg-teal-700 text-white disabled:bg-gray-300"
+                >
+                  {syncPlan.moves.length || syncPlan.creates.length
+                    ? `이동 ${syncPlan.moves.length} · 추가 ${syncPlan.creates.length} 적용`
+                    : '바뀐 배 없음'}
+                </button>
+              )}
+            </div>
+          )}
         </div>
       )}
       </div>

@@ -49,7 +49,7 @@ service cloud.firestore {
              data.x is number &&
              data.y is number &&
              data.r is number &&
-             (!('isLocked' in data) || data.isLocked is boolean);
+             (!('isLocked' in data) || data.isLocked is bool);
     }
 
     function isValidHistoryLog(data) {
@@ -78,6 +78,14 @@ service cloud.firestore {
       allow read: if true;
       allow create: if isValidHistoryLog(request.resource.data);
       allow update, delete: if false;
+    }
+
+    // 3중점검 수집 심장박동 하나만 산다. 앱이 "마지막 수집이 언제였나" 를
+    // 보여주는 용도라, 문서 id 를 safetyone 으로 고정해 잡동사니가 못 늘게 한다.
+    match /meta/safetyone {
+      allow read: if true;
+      allow write: if request.resource.data.keys().hasAll(['lastSuccess']) &&
+                      request.resource.data.lastSuccess is number;
     }
   }
 }
