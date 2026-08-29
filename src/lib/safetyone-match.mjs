@@ -88,6 +88,11 @@ export function parseListText(text) {
 
 const near = (a, b, d) => Math.abs(a.x - b.x) < d && Math.abs(a.y - b.y) < d;
 
+/** 그 자리에서 이 선석의 가장 가까운 슬롯까지 거리(체비셰프). 선석끼리 견줄 때 쓴다. */
+export function berthDist(pos, id) {
+  return Math.min(...BERTH_SLOTS[id].map(s => Math.max(Math.abs(pos.x - s.x), Math.abs(pos.y - s.y))));
+}
+
 /** 현재 좌표가 어느 선석인가 — 가장 가까운 슬롯 45 이내. 없으면 null. */
 export function berthOfPos(pos) {
   let best = null, bestD = 45;
@@ -102,7 +107,13 @@ export function berthOfPos(pos) {
 
 /**
  * 이동 계획을 세운다.
- * @param rows  [{hull, loc}] — 리스트에서 읽은 것
+ * @param rows  [{hull, loc, at?}] — 리스트에서 읽은 것.
+ *   `at: {x, y}` 는 세이프티원 실좌표를 우리 야드 좌표로 옮긴 **실제 자리**다
+ *   (src/lib/yard-transform.mjs). 있으면 슬롯 대신 그 자리에 놓는다.
+ *   ★슬롯을 쓰던 이유는 "리스트가 구간 안 순서를 주지 않아서" 였다(CLAUDE.md).
+ *    이제 좌표를 알므로 그 제약이 없다 — 임의의 빈 슬롯보다 실제 자리가 언제나 낫다.
+ *    다만 **선석이 같으면 안 옮긴다**는 규칙은 그대로다. 관리자가 손으로 다듬은 자리를
+ *    매 수집마다 12px 씩 흔들 이유가 없다.
  * @param live  Map(hull → {x, y, r, ...}) — 파이어스토어의 현재 배들
  * @returns { moves, creates, skips, sea, unknown, untouched }
  */
@@ -137,8 +148,15 @@ export function planMoves(rows, live) {
     if (c.kind === 'unknown') { unknown.push(c); continue; }
     if (c.kind === 'skip') { skips.push(c); continue; }
     let berth = c.berth;
-    let slot = takeSlot(berth);
-    if (!slot) { slot = takeSlot('waiting'); berth = 'waiting'; }
+    let slot;
+    if (c.at) {
+      // 실제 자리를 안다 — 슬롯을 고를 필요가 없다. 회전만 그 선석의 관례를 따른다
+      // (안벽 계류는 90, 도크·돌핀은 0). 세이프티원의 angle 은 우리 각도계와 달라 쓰지 않는다.
+      slot = { x: Math.round(c.at.x), y: Math.round(c.at.y), r: BERTH_SLOTS[berth][0].r };
+    } else {
+      slot = takeSlot(berth);
+      if (!slot) { slot = takeSlot('waiting'); berth = 'waiting'; }
+    }
     if (!slot) { unknown.push({ ...c, loc: `${c.loc} (자리 없음)` }); continue; }
     const item = { hull: c.hull, loc: c.loc, berth, to: slot, from: c.cur ? { x: c.cur.x, y: c.cur.y } : null };
     (c.kind === 'move' ? moves : creates).push(item);

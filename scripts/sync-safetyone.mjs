@@ -18,6 +18,7 @@ import { readFileSync } from 'node:fs';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, connectFirestoreEmulator, collection, getDocs, doc, setDoc, updateDoc, addDoc } from 'firebase/firestore';
 import { parseListText, planMoves, BERTH_LABEL } from '../src/lib/safetyone-match.mjs';
+import { residualMedian, namedRowsFromCoords, MAX_RESIDUAL } from '../src/lib/yard-transform.mjs';
 
 const args = process.argv.slice(2);
 const dry = args.includes('--dry');
@@ -29,34 +30,20 @@ if (!inputPath || args.indexOf('--input') === -1) {
 
 const raw = readFileSync(inputPath, 'utf8');
 let rows, unknownLines = [];
+let capture = null;
 try {
   const j = JSON.parse(raw);
-  // ★배 레이어 수집(kind:'coords')은 선석 이름이 아니라 x·y 를 준다. 좌표계 변환식을
-  //  확정하기 전에는 그 좌표가 어느 선석인지 모른다 — 모르면 쓰지 않는다.
-  if (!Array.isArray(j) && j.kind === 'coords') {
-    console.error('좌표로 수집됐다(배 레이어). 세이프티원↔야드 변환식이 아직 없으므로 아무것도 쓰지 않는다.');
-    console.error('먼저 node scripts/fit-yard-transform.mjs 로 변환식을 맞추고 잔차를 확인할 것.');
-    process.exit(1);
-  }
-  rows = (Array.isArray(j) ? j : j.rows).map(r => ({ hull: String(r.hull), loc: String(r.loc ?? r.위치 ?? '') }));
+  capture = Array.isArray(j) ? null : j;
+  rows = (Array.isArray(j) ? j : j.rows).map(r =>
+    r.tmx != null || r.tmy != null
+      ? { hull: String(r.hull), tmx: Number(r.tmx), tmy: Number(r.tmy) }
+      : { hull: String(r.hull), loc: String(r.loc ?? r.위치 ?? '') });
 } catch {
   ({ rows, unknownLines } = parseListText(raw));
 }
 if (!rows.length) {
   console.error('리스트에서 호선을 하나도 못 읽었다. 입력 파일을 확인할 것.');
   process.exit(1);
-}
-
-// ★안전장치: 야드에 배가 여러 척인데 **선석이 한 종류뿐**이면 그건 현실이 아니라 오독이다.
-//  2026-08-29 에 실제로 그랬다 — 수집기가 배마다 다른 선석 대신 모든 레코드에 똑같이
-//  들어 있는 필드를 집어 14척 전부 "1안벽" 으로 읽었고, 그대로 써서 배 8척을 옮겼다.
-//  한 척도 옮기기 전에 여기서 멈춘다.
-{
-  const berths = new Set(rows.map(r => String(r.loc).split('>')[0].trim()));
-  if (rows.length >= 5 && berths.size < 2) {
-    console.error(`위치가 한 종류뿐이다 (${rows.length}척 전부 "${[...berths][0]}") — 수집이 잘못됐다. 아무것도 쓰지 않는다.`);
-    process.exit(1);
-  }
 }
 
 const cfg = JSON.parse(readFileSync(new URL('../firebase-applet-config.json', import.meta.url)));
@@ -70,6 +57,38 @@ if (process.env.FIRESTORE_EMULATOR_HOST) {
 }
 const live = new Map();
 (await getDocs(collection(db, 'ships'))).forEach(d => live.set(d.id, d.data()));
+
+// ── 좌표 수집이면 선석 이름으로 바꾼다 ──────────────────────────────────
+// 세이프티원 배 레이어는 선석 이름을 주지 않는다. 실좌표(TM)를 우리 야드 좌표로 옮기고,
+// 그 자리가 어느 선석인지는 지도에서 배가 실제로 서는 자리(BERTH_SLOTS)로 판정한다.
+if (capture?.kind === 'coords') {
+  // ★박아 둔 변환식이 아직 맞는지 먼저 잰다. 도면을 다시 그렸거나 세이프티원이 좌표계를
+  //  바꿨으면 여기서 걸린다 — 어긋난 변환으로 배를 옮기는 것이 이 프로젝트의 가장 큰 사고였다.
+  const q = residualMedian(rows, live);
+  console.log(`변환식 검증 — 짝지은 배 ${q.n}척 · 잔차 중앙값 ${q.median.toFixed(1)}px (허용 ${MAX_RESIDUAL}px)`);
+  // 짝이 몇 척뿐이면 중앙값에 의미가 없다 — 우연히 맞은 한 척으로 변환식 전체를 승인하게 된다.
+  if (q.n < 8 || !(q.median <= MAX_RESIDUAL)) {
+    console.error('변환식이 지금 지도와 안 맞는다. 아무것도 쓰지 않는다.');
+    console.error('sync-safetyone.yml 을 mode=fit 으로 돌려 계수를 다시 재고 yard-transform.mjs 를 고칠 것.');
+    process.exit(1);
+  }
+  const named = namedRowsFromCoords(rows, live);
+  rows = named.rows;
+  if (named.off.length) console.log(`⚠ 아는 선석 근처가 아니다(손 안 댐): ${named.off.join(' ')}`);
+  if (named.held.length) console.log(`선석 경계라 지금 선석을 유지: ${named.held.join(' ')}`);
+}
+
+// ★안전장치: 야드에 배가 여러 척인데 **선석이 한 종류뿐**이면 그건 현실이 아니라 오독이다.
+//  2026-08-29 에 실제로 그랬다 — 수집기가 배마다 다른 선석 대신 모든 레코드에 똑같이
+//  들어 있는 필드를 집어 14척 전부 "1안벽" 으로 읽었고, 그대로 써서 배 8척을 옮겼다.
+//  한 척도 옮기기 전에 여기서 멈춘다.
+{
+  const berths = new Set(rows.map(r => String(r.loc).split('>')[0].trim()));
+  if (rows.length >= 5 && berths.size < 2) {
+    console.error(`위치가 한 종류뿐이다 (${rows.length}척 전부 "${[...berths][0]}") — 수집이 잘못됐다. 아무것도 쓰지 않는다.`);
+    process.exit(1);
+  }
+}
 
 const plan = planMoves(rows, live);
 const now = Date.now();
