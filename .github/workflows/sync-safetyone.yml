@@ -112,13 +112,17 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # 실패 시 현장 보존 — 다음 클로드 세션이 이 아티팩트를 읽고
+      # 실패 시 화면 "구조" 만 남긴다 — 다음 클로드 세션이 이걸 읽고
       # 사용자 없이 셀렉터를 고친다.
-      - name: Upload failure evidence
+      #
+      # ★out/ 을 통째로 올리면 안 된다. 이 레포는 공개고 액션 아티팩트도
+      #  공개로 내려받힌다 — 사내 시스템의 HTML·스크린샷을 올리는 건 곧 유출이다.
+      #  skeleton.json 만 올린다(태그·class·개수뿐, 글자 없음).
+      - name: Upload failure evidence (structure only, no page text)
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: safetyone-failure-${{ github.run_number }}
-          path: out/
+          path: out/skeleton.json
           retention-days: 7
           if-no-files-found: ignore
