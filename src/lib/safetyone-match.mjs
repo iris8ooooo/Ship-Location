@@ -86,7 +86,36 @@ export function parseListText(text) {
   return { rows, unknownLines };
 }
 
-const near = (a, b, d) => Math.abs(a.x - b.x) < d && Math.abs(a.y - b.y) < d;
+/**
+ * 호선번호가 차지하는 칸. 선체는 26x130 인데(App.tsx `w-[26px] h-[130px]`)
+ * 숫자는 그 안 88x18 에 들어간다 (CLAUDE.md 실측: "폭 26px 안에 18px,
+ * 길이 130px 안에 88px").
+ */
+export const LABEL_W = 18, LABEL_L = 88;
+
+/**
+ * 두 배의 **호선번호가 서로 가려지는가.**
+ *
+ * ★"좌표가 22px 안에 있으면 가깝다" 같은 한 개짜리 문턱으로는 안 된다
+ *  (2026-08-29 사용자 지적). 마커는 정사각형이 아니라 길쭉하고 회전한다.
+ *  8265(83,575)와 8206(75,560)은 세로로 15px 떨어져 있어 22px 검사를 통과했지만,
+ *  번호 폭이 18px 이라 숫자가 통째로 가려졌다. 반대로 길이 방향으로는 88px 까지
+ *  가려지는데 22px 검사는 그걸 아예 못 본다.
+ *
+ * ★선체 상자(26x130)로 재면 이번엔 과하다. 1BERTH 의 8209(966,368)와
+ *  8238(966,484)은 116px 떨어져 선체 끝이 14px 스치지만 번호는 멀쩡히 읽힌다 —
+ *  그걸 "겹침" 으로 잡으면 멀쩡한 배를 매시간 옮기게 된다. 지켜야 하는 건
+ *  선체가 아니라 **번호가 읽히는 것**이므로 번호 칸으로 잰다.
+ *
+ *  r 이 0/180 이면 번호가 세로로 길고, 90/270 이면 가로로 길다.
+ */
+export function labelsHidden(a, b) {
+  const half = (p) => (((p.r ?? 0) % 180 + 180) % 180 === 0)
+    ? { x: LABEL_W / 2, y: LABEL_L / 2 }
+    : { x: LABEL_L / 2, y: LABEL_W / 2 };
+  const A = half(a), B = half(b);
+  return Math.abs(a.x - b.x) < A.x + B.x && Math.abs(a.y - b.y) < A.y + B.y;
+}
 
 /** 그 자리에서 이 선석의 가장 가까운 슬롯까지 거리(체비셰프). 선석끼리 견줄 때 쓴다. */
 export function berthDist(pos, id) {
@@ -131,16 +160,20 @@ export function planMoves(rows, live) {
   });
 
   // 자리 점유: 안 움직이는 배 전부(리스트 밖 배 포함) + 이 배치에서 정한 목적지.
+  // 회전도 같이 담는다 — 겹침 판정이 마커 방향을 알아야 하기 때문이다.
   const movingHulls = new Set(classed.filter(c => c.kind === 'move').map(c => c.hull));
   const occupied = [...live.entries()]
     .filter(([hull]) => !movingHulls.has(hull))
-    .map(([, s]) => ({ x: s.x, y: s.y }));
+    .map(([, s]) => ({ x: s.x, y: s.y, r: s.r ?? 0 }));
+
+  /** 그 선석에서 아무와도 안 겹치는 첫 슬롯. 없으면 null. */
+  const freeSlot = (berth, taken) =>
+    BERTH_SLOTS[berth].find(slot => !taken.some(o => labelsHidden(o, slot))) ?? null;
 
   const takeSlot = (berth) => {
-    for (const slot of BERTH_SLOTS[berth]) {
-      if (!occupied.some(o => near(o, slot, 22))) { occupied.push({ x: slot.x, y: slot.y }); return slot; }
-    }
-    return null;                               // 슬롯이 다 찼다 — 대기열로 보낸다
+    const slot = freeSlot(berth, occupied);
+    if (slot) occupied.push({ x: slot.x, y: slot.y, r: slot.r });
+    return slot;                               // 슬롯이 다 찼으면 null — 대기열로 보낸다
   };
 
   for (const c of classed) {
@@ -152,16 +185,16 @@ export function planMoves(rows, live) {
     if (c.at) {
       // 실제 자리를 안다 — 슬롯을 고를 필요가 없다. 회전만 그 선석의 관례를 따른다
       // (안벽 계류는 90, 도크·돌핀은 0). 세이프티원의 angle 은 우리 각도계와 달라 쓰지 않는다.
-      const want = { x: Math.round(c.at.x), y: Math.round(c.at.y) };
+      const want = { x: Math.round(c.at.x), y: Math.round(c.at.y), r: BERTH_SLOTS[berth][0].r };
       // ★단, 그 자리에 이미 배가 있으면 놓지 않는다 (2026-08-29 실제로 겹쳤다).
       //  8265 를 실좌표 (83,575) 에 놓았더니 8206(75,560) 과 8px·15px 차이라
       //  마커 폭 26px 안에서 완전히 포개졌다. 세이프티원 좌표로도 둘은 21px 차이 —
       //  즉 실제로 나란히 붙어 있는(이중 계류) 배들이고, 좌표가 틀린 게 아니라
       //  **그 간격이 마커 폭보다 좁은** 것이다. 지도에서는 겹치면 안 되므로
       //  그럴 때는 그 선석의 빈 슬롯(이중 계류 자리 포함)으로 물러난다.
-      if (!occupied.some(o => near(o, want, 22))) {
-        slot = { ...want, r: BERTH_SLOTS[berth][0].r };
-        occupied.push({ x: slot.x, y: slot.y });
+      if (!occupied.some(o => labelsHidden(o, want))) {
+        slot = want;
+        occupied.push({ ...want });
       }
     }
     if (!slot) {
@@ -175,5 +208,43 @@ export function planMoves(rows, live) {
 
   const seen = new Set(rows.map(r => r.hull));
   const untouched = [...live.keys()].filter(h => !seen.has(h));
+
+  // ── 마지막: 이미 겹쳐 있는 배를 떼어놓는다 ────────────────────────────
+  // ★"선석이 같으면 안 옮긴다" 는 **손으로 다듬은 자리**를 지키려는 규칙이지,
+  //  겹쳐서 안 보이는 자리를 지키려는 규칙이 아니다. 한 번 겹쳐 써지고 나면
+  //  그 다음 수집은 전부 "그대로" 로 읽어 **영영 겹친 채로 남는다** — 실제로 8265 가
+  //  그랬다. 그래서 계획 마지막에 최종 자리를 다시 훑어 겹친 배를 옮긴다.
+  //  리스트 밖 호선은 여기서도 손대지 않는다. 장애물로만 센다.
+  {
+    const finalOf = (h) => {
+      const it = [...moves, ...creates].find(m => m.hull === h);
+      if (it) return { x: it.to.x, y: it.to.y, r: it.to.r };
+      const s = live.get(h);
+      return s ? { x: s.x, y: s.y, r: s.r ?? 0 } : null;
+    };
+    // 슬롯에 가까운 배부터 자리를 인정한다 — 어긋난 쪽이 옮겨져야 한다.
+    const offSlot = (p) => Math.min(...Object.values(BERTH_SLOTS).flat()
+      .map(s => Math.max(Math.abs(p.x - s.x), Math.abs(p.y - s.y))));
+    const placed = [];
+    for (const h of live.keys()) if (!seen.has(h)) { const p = finalOf(h); if (p) placed.push(p); }
+    for (const it of [...moves, ...creates]) placed.push({ ...it.to });
+
+    const ordered = [...skips]
+      .map(c => ({ c, p: finalOf(c.hull) }))
+      .filter(x => x.p)
+      .sort((a, b) => offSlot(a.p) - offSlot(b.p));
+    const kept = [];
+    for (const { c, p } of ordered) {
+      if (!placed.some(q => labelsHidden(q, p))) { placed.push(p); kept.push(c); continue; }
+      const slot = freeSlot(c.berth, placed) ?? freeSlot('waiting', placed);
+      if (!slot) { kept.push(c); continue; }            // 옮길 데가 없으면 그대로 둔다
+      placed.push({ x: slot.x, y: slot.y, r: slot.r });
+      moves.push({ hull: c.hull, loc: c.loc, berth: c.berth, to: slot,
+                   from: { x: p.x, y: p.y }, reason: '겹침' });
+    }
+    skips.length = 0;
+    skips.push(...kept);
+  }
+
   return { moves, creates, skips, sea, unknown, untouched };
 }
