@@ -31,6 +31,13 @@ const raw = readFileSync(inputPath, 'utf8');
 let rows, unknownLines = [];
 try {
   const j = JSON.parse(raw);
+  // ★배 레이어 수집(kind:'coords')은 선석 이름이 아니라 x·y 를 준다. 좌표계 변환식을
+  //  확정하기 전에는 그 좌표가 어느 선석인지 모른다 — 모르면 쓰지 않는다.
+  if (!Array.isArray(j) && j.kind === 'coords') {
+    console.error('좌표로 수집됐다(배 레이어). 세이프티원↔야드 변환식이 아직 없으므로 아무것도 쓰지 않는다.');
+    console.error('먼저 node scripts/fit-yard-transform.mjs 로 변환식을 맞추고 잔차를 확인할 것.');
+    process.exit(1);
+  }
   rows = (Array.isArray(j) ? j : j.rows).map(r => ({ hull: String(r.hull), loc: String(r.loc ?? r.위치 ?? '') }));
 } catch {
   ({ rows, unknownLines } = parseListText(raw));

@@ -24,15 +24,18 @@ on:
   #  사용자 확인: 야드의 배는 전부 제자리이고 호선명 변동도 없다. 그런데 수집은
   #  이동 5 · 추가 7 을 냈다 — 즉 12건이 오답이다. 야드에 없는 호선까지 나오는 걸 보면
   #  지도의 배 레이어(/gis/ships, 27척)가 아니라 점검 이력을 읽고 있는 것이다.
+  #  ★2026-08-29 스키마 실측으로 원인 확정: /gis/ships 에는 **선석 이름이 없다.**
+  #  shipno + x·y·angle 만 있다. 그러니 좌표계 변환식을 확정할 때까지는 반영할 수 없다.
   #  필드를 확정하기 전까지는 사람이 직접 돌릴 때만 동작한다.
   # schedule:
   #   - cron: '0 21-23,0-11 * * *'   # KST 06:00~20:00 매시
   workflow_dispatch:
     inputs:
-      dry:
-        description: '미리보기만 (파이어스토어에 쓰지 않음)'
-        type: boolean
-        default: false
+      mode:
+        description: 'fit=좌표계 맞추기(읽기만) / dry=미리보기 / apply=실제 반영'
+        type: choice
+        options: [fit, dry, apply]
+        default: fit
 
 concurrency:
   group: sync-safetyone
@@ -110,25 +113,41 @@ jobs:
           SAFETYONE_PW: ${{ secrets.SAFETYONE_PW }}
         run: node scripts/scrape-safetyone.mjs --out out/safetyone-list.json
 
-      # 미리보기일 때는 무엇을 읽었는지도 같이 본다 — 위치 문자열이 제대로 왔는지
-      # 확인하지 않고 프로덕션에 쓰면 배를 엉뚱한 데로 옮긴다(2026-08-29 실제로 그랬다).
-      - name: Show what was collected (dry run only)
-        if: steps.precheck.outputs.ready == 'true' && inputs.dry
+      # 무엇을 읽었는지 먼저 본다 — 확인 없이 프로덕션에 쓰면 배를 엉뚱한 데로
+      # 옮긴다(2026-08-29 실제로 그랬다).
+      - name: Show what was collected
+        if: steps.precheck.outputs.ready == 'true' && inputs.mode != 'apply'
         run: |
           {
-            echo "## 수집한 원본 (호선 → 위치)"
+            echo "## 수집한 원본 (호선 → 위치/좌표)"
             echo
             echo '```'
-            node -e "const j=require('./out/safetyone-list.json');for(const r of j.rows)console.log(r.hull,'→',r.loc)"
+            node -e "const j=require('./out/safetyone-list.json');console.log('kind:',j.kind,'·',j.rows.length,'척');for(const r of j.rows)console.log(r.hull,'→',j.kind==='coords'?\`x=\${r.x} y=\${r.y} angle=\${r.angle} rot=\${r.rotation}\`:r.loc)"
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # ★좌표계 맞추기. 아무것도 쓰지 않고 변환식 계수와 잔차만 낸다.
+      #  세이프티원 배 레이어는 선석 이름이 아니라 x·y 를 준다 — 그 좌표가 우리 야드의
+      #  어디인지 확정되기 전에는 선석 이름을 붙일 수 없다.
+      - name: Fit yard transform (writes nothing)
+        if: steps.precheck.outputs.ready == 'true' && inputs.mode == 'fit'
+        run: |
+          set -o pipefail
+          node scripts/fit-yard-transform.mjs --input out/safetyone-list.json | tee out/fit.log
+          {
+            echo "## 좌표계 맞추기 결과"
+            echo
+            echo '```'
+            cat out/fit.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Apply to Firestore
-        if: steps.precheck.outputs.ready == 'true'
+        if: steps.precheck.outputs.ready == 'true' && inputs.mode != 'fit'
         run: |
           # ★pipefail 이 없으면 tee 의 종료코드만 보게 돼 반영 실패가 초록불로 묻힌다.
           set -o pipefail
-          node scripts/sync-safetyone.mjs --input out/safetyone-list.json ${{ inputs.dry && '--dry' || '' }} | tee out/apply.log
+          node scripts/sync-safetyone.mjs --input out/safetyone-list.json ${{ inputs.mode == 'dry' && '--dry' || '' }} | tee out/apply.log
           {
             echo "## 3중점검 수집 결과"
             echo
