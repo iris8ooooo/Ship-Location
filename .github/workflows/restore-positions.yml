@@ -1,0 +1,61 @@
+name: Restore ship positions (incident 2026-08-29)
+
+# 일회성 복구다. 2026-08-29 의 첫 3중점검 자동수집이 위치 필드를 잘못 읽어
+# (14척 전부 "1안벽") 배 8척을 엉뚱한 자리로 옮기고 8265 를 새로 만들었다.
+#
+# 아래 좌표는 그 실행 로그에 남은 **사고 직전 실제 값**이고,
+# 회전값은 docs/reference/ship-placement.json 과 8척 중 7척이 정확히 일치해 확인했다
+# (8313 만 그 뒤 손으로 옮긴 흔적이 있어 x,y 는 로그값, r 은 파일값을 쓴다).
+#
+# 원인은 이미 고쳤다: 선석 필드를 "값이 갈리는 정도" 로 고르고,
+# 선석이 한 종류뿐이면 반영 전에 멈춘다.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - name: Put the eight ships back and remove the one that was added
+        run: |
+          set -o pipefail
+          node --input-type=module <<'JS' | tee restore.log
+          import { readFileSync } from 'node:fs';
+          import { initializeApp } from 'firebase/app';
+          import { getFirestore, doc, updateDoc, deleteDoc } from 'firebase/firestore';
+
+          const BEFORE = {
+            '8203': { x: 207,  y: 704, r: 0  },
+            '8208': { x: 246,  y: 593, r: 90 },
+            '8206': { x: 75,   y: 560, r: 90 },
+            '8207': { x: 245,  y: 563, r: 90 },
+            '8222': { x: 138,  y: 704, r: 0  },
+            '8313': { x: 1002, y: 658, r: 0  },
+            '8314': { x: 611,  y: 707, r: 0  },
+            '8282': { x: 174,  y: 704, r: 0  },
+          };
+          const REMOVE = ['8265'];   // 사고 실행이 새로 만든 문서
+
+          const cfg = JSON.parse(readFileSync('firebase-applet-config.json', 'utf8'));
+          const db = getFirestore(initializeApp(cfg), cfg.firestoreDatabaseId);
+
+          for (const [hull, pos] of Object.entries(BEFORE)) {
+            await updateDoc(doc(db, 'ships', hull), pos);
+            console.log(`되돌림 ${hull} → (${pos.x},${pos.y}) r${pos.r}`);
+          }
+          for (const hull of REMOVE) {
+            await deleteDoc(doc(db, 'ships', hull));
+            console.log(`삭제 ${hull}`);
+          }
+          console.log(`복구 완료 — 되돌림 ${Object.keys(BEFORE).length} · 삭제 ${REMOVE.length}`);
+          process.exit(0);
+          JS
+      - name: Summary
+        if: always()
+        run: |
+          { echo "## 복구 결과"; echo; echo '```'; cat restore.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
