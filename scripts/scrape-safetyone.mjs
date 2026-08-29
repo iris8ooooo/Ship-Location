@@ -39,59 +39,85 @@ const browser = await chromium.launch(
 const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
 
 /**
- * 죽기 전에 화면 "구조" 만 남긴다 — 글자는 담지 않는다(공개 아티팩트라서).
+ * 죽기 전에 화면 "구조" 만 남긴다 — 글자는 담지 않는다(공개 로그·아티팩트라서).
  * 다음 세션이 이 뼈대를 보고 셀렉터를 고친다.
+ *
+ * iframe 안에 든 경우가 흔해서 **프레임을 전부** 훑는다. 행 후보는 "같은 class 조합이
+ * 여러 번 반복되는 요소" 로 찾는다 — 표가 <table> 이 아니라 div 그리드인 경우가 많다.
+ * 버튼 이름은 **미리 정한 낱말과 맞는지만** 본다(맞음/아님). 내용을 옮기지 않으려는 것이다.
  */
+const NAV_WORDS = ['3중점검', '삼중점검', '리스트', '목록', '조회', '검색', '전체', '더보기', '펼치기'];
+
+async function skeletonOf(frame) {
+  return frame.evaluate((navWords) => {
+    const HULL = /\b8\d{3}\b/;
+    const BERTH = /(1도크|2도크|1안벽|2안벽|1돌핀|2돌핀|플로팅|1BERTH|시운전|출항|해상)/;
+    const clsOf = (el) => (typeof el.className === 'string')
+      ? el.className.split(/\s+/).filter(Boolean).slice(0, 4).join('.') : '';
+    const count = (sel) => document.querySelectorAll(sel).length;
+
+    // 행처럼 생긴 것: 같은 class 조합이 5번 이상 반복되고, 형제끼리 나란한 요소.
+    const sig = new Map();
+    for (const el of document.querySelectorAll('div, li, tr, [role="row"]')) {
+      const key = `${el.tagName}.${clsOf(el)}`;
+      if (!sig.has(key)) sig.set(key, { key, n: 0, hull: 0, berth: 0, both: 0, textLen: 0 });
+      const v = sig.get(key);
+      v.n++;
+      const t = el.innerText || '';
+      if (HULL.test(t)) v.hull++;
+      if (BERTH.test(t)) v.berth++;
+      if (HULL.test(t) && BERTH.test(t)) v.both++;
+      v.textLen = Math.max(v.textLen, t.trim().length);
+    }
+    const repeated = [...sig.values()].filter(v => v.n >= 5)
+      .sort((a, b) => (b.both - a.both) || (b.hull - a.hull) || (b.n - a.n)).slice(0, 12);
+
+    // 눌러야 열리는 것들: 이름이 미리 정한 낱말과 맞는지만 본다.
+    const clickable = [];
+    for (const el of document.querySelectorAll('button, a, [role="tab"], [role="button"], input[type="button"], input[type="submit"]')) {
+      const t = (el.innerText || el.value || '').trim();
+      const hit = navWords.filter(w => t.includes(w));
+      if (hit.length) clickable.push({ tag: el.tagName, cls: clsOf(el), role: el.getAttribute('role') || undefined, 낱말: hit });
+    }
+    return {
+      url: location.origin + location.pathname,
+      charset: document.characterSet,
+      counts: {
+        form: count('form'), input: count('input'), button: count('button'),
+        table: count('table'), tr: count('tr'), roleRow: count('[role="row"]'),
+        li: count('li'), canvas: count('canvas'), iframe: count('iframe'),
+        div: count('div'),
+      },
+      전체매칭: (() => {
+        let hull = 0, berth = 0, both = 0;
+        for (const el of document.querySelectorAll('tr, [role="row"], li, div')) {
+          const t = el.innerText || '';
+          const h = HULL.test(t), b = BERTH.test(t);
+          if (h) hull++; if (b) berth++; if (h && b) both++;
+        }
+        return { 호선번호꼴: hull, 선석꼴: berth, 둘다: both };
+      })(),
+      행후보: repeated,
+      눌러볼것: clickable.slice(0, 20),
+    };
+  }, NAV_WORDS);
+}
+
 async function bail(reason) {
   console.error(`실패: ${reason}`);
   try {
-    const skeleton = await page.evaluate(() => {
-      const HULL = /\b8\d{3}\b/;
-      const BERTH = /(1도크|2도크|1안벽|2안벽|1돌핀|2돌핀|플로팅|1BERTH|시운전|출항|해상)/;
-      const node = (el) => ({
-        tag: el.tagName,
-        id: el.id || undefined,
-        cls: (el.className && typeof el.className === 'string')
-          ? el.className.split(/\s+/).filter(Boolean).slice(0, 6) : undefined,
-        attrs: el.getAttributeNames().filter(a => a !== 'class' && a !== 'id').slice(0, 8),
-        kids: el.children.length,
-        textLen: (el.textContent || '').trim().length,      // 길이만, 내용은 없다
-      });
-      const count = (sel) => document.querySelectorAll(sel).length;
-      // 호선번호·선석이 글자로 존재하기는 하는지 "개수" 로만 확인한다.
-      let hullish = 0, berthish = 0, both = 0;
-      for (const el of document.querySelectorAll('tr, [role="row"], li')) {
-        const t = el.innerText || '';
-        const h = HULL.test(t), b = BERTH.test(t);
-        if (h) hullish++;
-        if (b) berthish++;
-        if (h && b) both++;
-      }
-      return {
-        url: location.origin + location.pathname,          // 쿼리·해시는 뺀다
-        title꼴: (document.title || '').length,
-        // ★"호선번호꼴행은 잡히는데 선석꼴행이 0" 이면 십중팔구 인코딩이다.
-        //  숫자는 어떤 인코딩에서도 살아남고 한글만 깨지기 때문이다(실측으로 재현했다).
-        //  그 경우 charset 을 먼저 본다 — 사내 시스템은 EUC-KR 인 경우가 흔하다.
-        charset: document.characterSet,
-        counts: {
-          form: count('form'), input: count('input'),
-          inputPassword: count('input[type="password"]'),
-          inputText: count('input[type="text"], input[type="email"], input:not([type])'),
-          button: count('button'), table: count('table'), tr: count('tr'),
-          roleRow: count('[role="row"]'), li: count('li'), canvas: count('canvas'),
-          iframe: count('iframe'),
-        },
-        매칭: { 호선번호꼴행: hullish, 선석꼴행: berthish, 둘다: both },
-        // 표처럼 생긴 컨테이너의 뼈대만 (최대 30개)
-        rows: [...document.querySelectorAll('table, [role="table"], [role="grid"], ul, tbody')]
-          .slice(0, 30).map(node),
-        landmarks: [...document.querySelectorAll('main, nav, header, section, [role="tablist"], [role="tab"]')]
-          .slice(0, 30).map(node),
-      };
-    });
-    writeFileSync(`${dirname(outPath)}/skeleton.json`, JSON.stringify({ reason, skeleton }, null, 1));
-    console.error(`구조만 보존: ${dirname(outPath)}/skeleton.json (글자는 담지 않았다)`);
+    const frames = [];
+    for (const f of page.frames()) {
+      try { frames.push(await skeletonOf(f)); }
+      catch (e) { frames.push({ url: '(접근 불가)', error: String(e).slice(0, 120) }); }
+    }
+    const dump = { reason, frameCount: page.frames().length, frames };
+    writeFileSync(`${dirname(outPath)}/skeleton.json`, JSON.stringify(dump, null, 1));
+    // ★로그에도 그대로 찍는다. 글자가 없으니 공개돼도 안전하고, 아티팩트를 내려받지
+    //  못하는 환경(원격 세션)에서도 다음 세션이 바로 읽고 고칠 수 있다.
+    console.error('----- 화면 구조 (글자 없음) -----');
+    console.error(JSON.stringify(dump, null, 1));
+    console.error('----- 끝 -----');
   } catch { /* 보존도 실패 — 어쩔 수 없다 */ }
   await browser.close();
   process.exit(1);
@@ -135,25 +161,54 @@ for (const label of ['3중점검', '리스트']) {
   }
 }
 
-// ── 리스트 추출 (관대한 기준 — capture.js 와 동일) ─────────────────────────
-const rows = await page.evaluate(() => {
-  const BERTH = /(1도크|2도크|1안벽|2안벽|1돌핀|2돌핀|플로팅|1BERTH|시운전|출항|해상)/;
-  const out = [];
-  const seen = new Set();
-  for (const tr of document.querySelectorAll('tr, [role="row"], li')) {
-    const t = (tr.innerText || '').replace(/\n/g, ' ').trim();
-    const hull = t.match(/\b(8\d{3})\b/);
-    const berth = t.match(BERTH);
-    if (hull && berth && !seen.has(hull[1])) {
-      seen.add(hull[1]);
+// ── 리스트 추출 ──────────────────────────────────────────────────────────
+// 프레임을 전부 훑는다 — 사내 시스템은 본문을 iframe 에 담는 경우가 흔하다.
+// 행은 tr/li 만이 아니라 **div 그리드**일 수도 있어 div 까지 후보로 본다.
+// 대신 조상까지 잡히면 표 전체가 한 행이 되므로 "가장 안쪽" 만 남긴다.
+async function rowsFrom(frame) {
+  return frame.evaluate(() => {
+    const BERTH = /(1도크|2도크|1안벽|2안벽|1돌핀|2돌핀|플로팅|1BERTH|시운전|출항|해상)/;
+    const HULL = /(^|[^0-9])(8\d{3})([^0-9]|$)/;
+    // ★innerText 를 쓰면 안 된다. 칸이 <span> 같은 inline 이면 글자를 그대로 붙여
+    //  "83002도크" 가 되고, 그러면 호선번호 경계가 깨져 한 척도 못 잡는다(실측).
+    //  그래서 글자 노드를 칸으로 모아 탭으로 잇는다 — 표든 div 그리드든 같게 읽힌다.
+    const cellsOf = (el) => {
+      const parts = [];
+      (function walk(n) {
+        for (const c of n.childNodes) {
+          if (c.nodeType === 3) { const t = c.textContent.trim(); if (t) parts.push(t); }
+          else if (c.nodeType === 1) walk(c);
+        }
+      })(el);
+      return parts;
+    };
+    const textOf = (el) => cellsOf(el).join('\t');
+    const hits = (el) => { const t = textOf(el); return HULL.test(t) && BERTH.test(t); };
+    const inner = [...document.querySelectorAll('tr, [role="row"], li, div')]
+      .filter(hits)
+      .filter(el => ![...el.querySelectorAll('*')].some(hits));   // 가장 안쪽만
+    const out = [];
+    const seen = new Set();
+    for (const el of inner) {
+      const cells = cellsOf(el);
+      const hull = textOf(el).match(HULL);
+      if (!hull || seen.has(hull[2])) continue;
+      seen.add(hull[2]);
       // 행을 통째로 담으면 상태·날짜 칸까지 붙는다. 선석 이름이 든 칸만 위치로.
-      const raw = (tr.innerText || '');
-      const cell = raw.split(/[\t\n]/).map(c => c.trim()).find(c => BERTH.test(c) && !/^8\d{3}$/.test(c));
-      out.push({ hull: hull[1], loc: (cell ?? t.slice(hull.index + 4)).trim().slice(0, 120) });
+      const cell = cells.find(c => BERTH.test(c) && !/^8\d{3}$/.test(c));
+      out.push({ hull: hull[2], loc: (cell ?? cells.join(' ')).trim().slice(0, 120) });
     }
-  }
-  return out;
-});
+    return out;
+  });
+}
+
+const rows = [];
+const seenHull = new Set();
+for (const f of page.frames()) {
+  let got = [];
+  try { got = await rowsFrom(f); } catch { /* 접근 못 하는 프레임은 넘긴다 */ }
+  for (const r of got) if (!seenHull.has(r.hull)) { seenHull.add(r.hull); rows.push(r); }
+}
 
 // 야드엔 보통 20척 이상 있다. 몇 척 안 잡혔으면 리스트가 안 펼쳐진 것이다.
 if (rows.length < 5) await bail(`행을 ${rows.length}개밖에 못 읽었다 — 리스트가 안 펼쳐졌거나 화면 구조가 바뀌었다`);
