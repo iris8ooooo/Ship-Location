@@ -146,6 +146,35 @@ export function berthOfPos(pos) {
  * @param live  Map(hull → {x, y, r, ...}) — 파이어스토어의 현재 배들
  * @returns { moves, creates, skips, sea, unknown, untouched }
  */
+/**
+ * 마커 회전을 정한다 — **축은 세이프티원이, 앞뒤는 사람이.**
+ *
+ * ★세이프티원은 선수 방향을 주지 않는다 (2026-08-29 확정).
+ *  배 레이어 22개 필드 중 각도는 `angle`·`rotation` 둘뿐이고, 값은 23척에서
+ *  `0` 과 `±90` **두 가지**뿐이다 — 즉 "가로로 누웠나 세로로 섰나"(축)만 말하고
+ *  뱃머리가 어느 끝인지는 말하지 않는다. 원본 도면도 마찬가지다: 배를 양끝이
+ *  똑같은 대칭 렌즈(8206)나 직사각형(8222)으로 그린다. 공정관리비서 Supabase
+ *  `vessels`·`vessel_specs` 에도 방향 필드가 없다. **어디에도 없다.**
+ *
+ *  그래서 앞뒤는 사람이 지도에서 돌려 정하는 수밖에 없고, 그렇다면 수집이 그걸
+ *  덮어쓰면 안 된다. 예전에는 옮길 때마다 `BERTH_SLOTS[berth][0].r` 로 되돌려서
+ *  관리자가 아무리 돌려놔도 다음 이동에서 사라졌다.
+ *
+ * @param curR    지금 마커 회전(없으면 null)
+ * @param axisR   있어야 할 축 — 0(세로) 또는 90(가로). 모르면 fallbackR 의 축을 쓴다.
+ * @param fallbackR 축이 바뀌어 앞뒤를 유추할 수 없을 때 쓸 값(그 선석의 관례)
+ */
+export function shipHeading(curR, axisR, fallbackR) {
+  const axis = (((axisR ?? fallbackR) % 180) + 180) % 180;
+  if (!Number.isFinite(curR)) return fallbackR;
+  const cur = ((curR % 360) + 360) % 360;
+  // 이미 맞는 축이면 그대로 둔다 — 사람이 고른 앞뒤를 지키는 것이 여기 전부다.
+  if (cur % 180 === axis) return cur;
+  // 축이 90° 바뀌면 옛 방향은 새 앞뒤에 대해 아무 정보도 주지 않는다(양쪽이 등거리).
+  // 지어내지 말고 그 선석의 관례로 돌아간다.
+  return fallbackR;
+}
+
 export function planMoves(rows, live) {
   const moves = [], creates = [], skips = [], sea = [], unknown = [];
 
@@ -155,7 +184,7 @@ export function planMoves(rows, live) {
     const berth = berthFromLoc(row.loc);
     if (!berth) return { ...row, kind: 'unknown' };
     const cur = live.get(row.hull);
-    if (cur && berthOfPos(cur) === berth) return { ...row, kind: 'skip', berth };
+    if (cur && berthOfPos(cur) === berth) return { ...row, kind: 'skip', berth, cur };
     return { ...row, kind: cur ? 'move' : 'create', berth, cur };
   });
 
@@ -179,13 +208,26 @@ export function planMoves(rows, live) {
   for (const c of classed) {
     if (c.kind === 'sea') { sea.push(c); continue; }
     if (c.kind === 'unknown') { unknown.push(c); continue; }
-    if (c.kind === 'skip') { skips.push(c); continue; }
+    if (c.kind === 'skip') {
+      // 선석은 그대로인데 **축**이 세이프티원과 다르면 제자리에서 돌려만 준다.
+      // ★이게 없으면 한 번 어긋난 축이 영영 고착된다 — "선석이 같으면 안 옮긴다" 때문에
+      //  다음 수집부터 계속 "그대로" 로 읽히기 때문이다. 이 프로젝트가 반복해서 당한 모양이다.
+      //  세이프티원이 축을 말해 줄 때(c.axisR)만 손댄다. 값이 없으면 추측하지 않는다.
+      const curR = (((c.cur.r ?? 0) % 360) + 360) % 360;
+      const want = c.axisR == null ? curR : shipHeading(curR, c.axisR, BERTH_SLOTS[c.berth][0].r);
+      if (want === curR) { skips.push(c); continue; }
+      moves.push({ hull: c.hull, loc: c.loc, berth: c.berth,
+                   to: { x: c.cur.x, y: c.cur.y, r: want },
+                   from: { x: c.cur.x, y: c.cur.y }, reason: '축' });
+      continue;
+    }
     let berth = c.berth;
     let slot;
     if (c.at) {
-      // 실제 자리를 안다 — 슬롯을 고를 필요가 없다. 회전만 그 선석의 관례를 따른다
-      // (안벽 계류는 90, 도크·돌핀은 0). 세이프티원의 angle 은 우리 각도계와 달라 쓰지 않는다.
-      const want = { x: Math.round(c.at.x), y: Math.round(c.at.y), r: BERTH_SLOTS[berth][0].r };
+      // 실제 자리를 안다 — 슬롯을 고를 필요가 없다. 회전은 축만 세이프티원(c.axisR)이
+      // 정하고 앞뒤는 지금 값을 지킨다(shipHeading).
+      const want = { x: Math.round(c.at.x), y: Math.round(c.at.y),
+                     r: shipHeading(c.cur?.r, c.axisR, BERTH_SLOTS[berth][0].r) };
       // ★단, 그 자리에 이미 배가 있으면 놓지 않는다 (2026-08-29 실제로 겹쳤다).
       //  8265 를 실좌표 (83,575) 에 놓았더니 8206(75,560) 과 8px·15px 차이라
       //  마커 폭 26px 안에서 완전히 포개졌다. 세이프티원 좌표로도 둘은 21px 차이 —
@@ -202,6 +244,8 @@ export function planMoves(rows, live) {
       if (!slot) { slot = takeSlot('waiting'); berth = 'waiting'; }
     }
     if (!slot) { unknown.push({ ...c, loc: `${c.loc} (자리 없음)` }); continue; }
+    // 슬롯으로 물러날 때도 앞뒤는 지킨다 — 자리를 양보한 것이지 뱃머리를 돌린 게 아니다.
+    slot = { ...slot, r: shipHeading(c.cur?.r, c.axisR, slot.r) };
     const item = { hull: c.hull, loc: c.loc, berth, to: slot, from: c.cur ? { x: c.cur.x, y: c.cur.y } : null };
     (c.kind === 'move' ? moves : creates).push(item);
   }

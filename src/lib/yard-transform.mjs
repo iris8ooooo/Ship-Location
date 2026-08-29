@@ -81,16 +81,31 @@ export const MAX_RESIDUAL = 20;
  * 스크립트가 아니라 여기 있는 이유: 이게 **틀리면 배가 엉뚱한 데로 가는 판정**이라
  * 파이어스토어 없이 그대로 돌려 볼 수 있어야 한다. 실제 코드를 테스트해야 의미가 있다.
  *
- * @param rows [{hull, tmx, tmy}]
+ * @param rows [{hull, tmx, tmy, angle}]
  * @param live Map(hull → {x, y})
  * @returns {rows, off, held} — off: 아는 선석 근처가 아닌 호선 / held: 경계라 이름을 유지한 호선
  */
+/**
+ * 세이프티원 `angle` → 우리 마커의 **축**. 0 = 세로(r 0/180), 90 = 가로(r 90/270).
+ *
+ * ★축까지만이다. 실측 23척의 angle 은 `0` 과 `±90` 두 값뿐이라 "가로냐 세로냐" 밖에
+ *  말하지 못한다 — 뱃머리가 어느 끝인지는 세이프티원에 없다(safetyone-match.mjs
+ *  shipHeading 주석 참고). 여기서 그 이상을 지어내면 안 된다.
+ *
+ *  검증(2026-08-29 실야드 23척): angle=0 인 8척은 전부 안벽 계류(가로), ±90 인
+ *  15척은 전부 도크·돌핀·1BERTH·플로팅(세로)로, 지도의 현재 축과 23/23 일치했다.
+ */
+export function axisFromAngle(angle) {
+  if (!Number.isFinite(angle)) return null;      // 값이 없으면 추측하지 않는다
+  return (((angle % 180) + 180) % 180) === 0 ? 90 : 0;
+}
+
 export function namedRowsFromCoords(rows, live) {
   const off = [], held = [];
   const out = rows.map(r => {
     const at = tmToYard(r.tmx, r.tmy);
     let berth = at && berthOfPos(at);
-    if (!berth) { off.push(r.hull); return { hull: r.hull, loc: '' }; }
+    if (!berth) { off.push(r.hull); return { hull: r.hull, loc: '', axisR: axisFromAngle(r.angle) }; }
     // ★경계에서는 지금 선석을 유지한다 (2026-08-29 적대적 리뷰에서 잡힌 결함).
     //  2도크와 1도크는 슬롯 간격이 체비셰프 54px 뿐이라 실효 경계가 27px 인데,
     //  8300 은 22.0px · 8283 은 23.0px 만 밀려도 이름이 뒤집힌다 — 실측 변환 오차
@@ -105,7 +120,7 @@ export function namedRowsFromCoords(rows, live) {
       held.push(`${r.hull}(${BERTH_LABEL[berth]}→${BERTH_LABEL[curBerth]})`);
       berth = curBerth;
     }
-    return { hull: r.hull, loc: BERTH_LABEL[berth], at };
+    return { hull: r.hull, loc: BERTH_LABEL[berth], at, axisR: axisFromAngle(r.angle) };
   });
   return { rows: out, off, held };
 }
