@@ -145,8 +145,17 @@ function shipsFromLayer(node) {
       seen.add(hull);
       out.push({
         hull, x, y,
+        // ★x·y 는 **전역 좌표가 아니다** (2026-08-29 실측). 안벽에 붙은 배끼리만 모아
+        //  1차식을 맞추면 오차가 1~4px 인데, 도크 안 배는 x 가 60~4100 으로 자릿수부터
+        //  다르다 — 구조물마다 원점이 따로인 **지역 좌표**다. 23척을 한 식으로 맞추면
+        //  RMS 215px 가 나온다(run 14).
+        //  centerTm* 은 23척 전부 값이 달라 전역 실좌표(TM)일 가능성이 크다. 둘 다 담고
+        //  어느 쪽이 우리 지도와 이어지는지는 맞춰 보고 고른다 — 추측하지 않는다.
+        tmx: num(n.centerTmX), tmy: num(n.centerTmY),
         angle: num(n.angle), rotation: num(n.rotation),
         length: num(n.length), width: num(n.width),
+        // 구조물 이름이 직접 들어 있으면 그게 곧 선석이다. 있으면 담고 없으면 null.
+        dock: typeof n.dock === 'string' ? n.dock : null,
       });
     }
     for (const v of Object.values(n)) walk(v);

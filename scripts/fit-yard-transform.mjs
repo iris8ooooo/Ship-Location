@@ -90,57 +90,80 @@ const apply = (t, p) => ({ x: t.a * p.sx + t.b * p.sy + t.c, y: t.d * p.sx + t.e
 const resid = (t, p) => Math.hypot(apply(t, p).x - p.ux, apply(t, p).y - p.uy);
 
 // ── 기준점 짝짓기 ────────────────────────────────────────────────────────
-const pts = [];
 const onlyMap = [], onlySafety = [];
-for (const [hull, r] of src) {
-  const cur = live.get(hull);
-  if (cur && Number.isFinite(cur.x) && Number.isFinite(cur.y)) pts.push({ hull, sx: r.x, sy: r.y, ux: cur.x, uy: cur.y });
-  else onlySafety.push(hull);
-}
+for (const hull of src.keys()) if (!live.has(hull)) onlySafety.push(hull);
 for (const hull of live.keys()) if (!src.has(hull)) onlyMap.push(hull);
 
-console.log(`세이프티원 ${src.size}척 · 우리 지도 ${live.size}척 · 짝지어진 기준점 ${pts.length}쌍`);
+console.log(`세이프티원 ${src.size}척 · 우리 지도 ${live.size}척`);
 console.log(`세이프티원에만 있는 호선(${onlySafety.length}): ${onlySafety.sort().join(' ') || '없음'}`);
 console.log(`우리 지도에만 있는 호선(${onlyMap.length}): ${onlyMap.sort().join(' ') || '없음'}`);
-if (pts.length < 6) {
-  console.error('\n기준점이 6쌍도 안 된다 — 이 정도로 변환식을 믿을 수 없다.');
-  process.exit(1);
-}
 
-// 손으로 옮겨 둔 배가 섞여 있을 수 있다. 한 번 맞춘 뒤 크게 벗어난 점을 빼고 다시 맞춘다.
-let t = fitAffine(pts);
-if (!t) { console.error('기준점이 한 직선에 몰려 있어 못 푼다.'); process.exit(1); }
-let used = pts;
-{
-  const rs = pts.map(p => resid(t, p));
-  const rms = Math.sqrt(rs.reduce((s, v) => s + v * v, 0) / rs.length);
-  const keep = pts.filter(p => resid(t, p) <= Math.max(3 * rms, 20));
-  if (keep.length >= 6 && keep.length < pts.length) {
-    const t2 = fitAffine(keep);
-    if (t2) { t = t2; used = keep; }
+/**
+ * ★후보가 둘이다. 어느 쪽인지 **고르지 않고 둘 다 맞춰 본다** (2026-08-29 run 14).
+ *   x·y      : 지도가 배를 그리는 값이지만 **구조물 안의 지역 좌표**로 보인다.
+ *              안벽에 붙은 배끼리만 맞추면 오차 1~4px 인데 도크 안 배는 자릿수가 다르고,
+ *              23척을 한 식으로 맞추면 RMS 215px 가 나왔다.
+ *   centerTm : 23척 전부 값이 다르다. 국가 평면직각좌표(TM)라면 전역 실좌표다.
+ *              야드 도면은 실제 야드를 그대로 옮긴 그림이니 TM→지도는 아핀이어야 한다.
+ *  잘 되는 쪽과 안 되는 쪽을 나란히 놓고 차이를 보는 게 추측보다 늘 빠르다(CLAUDE.md).
+ */
+const CANDS = [
+  { name: 'x·y (구조물 안 지역 좌표?)', get: r => [r.x, r.y] },
+  { name: 'centerTmX·centerTmY (전역 TM?)', get: r => [r.tmx, r.tmy] },
+];
+
+const results = [];
+for (const cand of CANDS) {
+  const pts = [];
+  for (const [hull, r] of src) {
+    const cur = live.get(hull);
+    const [sx, sy] = cand.get(r);
+    if (cur && Number.isFinite(cur.x) && Number.isFinite(cur.y) && Number.isFinite(sx) && Number.isFinite(sy))
+      pts.push({ hull, sx, sy, ux: cur.x, uy: cur.y });
   }
+  if (pts.length < 6) { results.push({ cand, skip: `기준점 ${pts.length}쌍뿐` }); continue; }
+
+  // 손으로 옮겨 둔 배가 섞여 있을 수 있다. 한 번 맞춘 뒤 크게 벗어난 점을 빼고 다시 맞춘다.
+  let t = fitAffine(pts);
+  if (!t) { results.push({ cand, skip: '기준점이 한 직선에 몰려 있다' }); continue; }
+  let used = pts;
+  {
+    const r0 = pts.map(p => resid(t, p));
+    const rms0 = Math.sqrt(r0.reduce((s, v) => s + v * v, 0) / r0.length);
+    const keep = pts.filter(p => resid(t, p) <= Math.max(3 * rms0, 20));
+    if (keep.length >= 6 && keep.length < pts.length) {
+      const t2 = fitAffine(keep);
+      if (t2) { t = t2; used = keep; }
+    }
+  }
+  const rs = used.map(p => resid(t, p));
+  const rms = Math.sqrt(rs.reduce((s, v) => s + v * v, 0) / rs.length);
+  results.push({ cand, t, used, dropped: pts.length - used.length, rms, max: Math.max(...rs) });
 }
 
-const rs = used.map(p => resid(t, p));
-const rms = Math.sqrt(rs.reduce((s, v) => s + v * v, 0) / rs.length);
-// 아핀의 선형부를 회전·축척으로 읽는다 — 도면을 얼마나 돌리고 키운 것인지 눈으로 보려고.
-const scaleX = Math.hypot(t.a, t.d), scaleY = Math.hypot(t.b, t.e);
-const rotDeg = Math.atan2(t.d, t.a) * 180 / Math.PI;
-
-console.log(`\n----- 아핀 변환 (세이프티원 → 야드 1380x840) -----`);
-console.log(`x' = ${t.a.toFixed(6)}·x + ${t.b.toFixed(6)}·y + ${t.c.toFixed(3)}`);
-console.log(`y' = ${t.d.toFixed(6)}·x + ${t.e.toFixed(6)}·y + ${t.f.toFixed(3)}`);
-console.log(`축척 ${scaleX.toFixed(4)} / ${scaleY.toFixed(4)} · 회전 ${rotDeg.toFixed(2)}°`);
-console.log(`기준점 ${used.length}쌍 (버린 것 ${pts.length - used.length}) · RMS 잔차 ${rms.toFixed(1)}px · 최대 ${Math.max(...rs).toFixed(1)}px`);
-console.log(`\n호선별 잔차 (큰 것부터)`);
-for (const p of [...used].sort((x, y) => resid(t, y) - resid(t, x))) {
-  const q = apply(t, p);
-  console.log(`  ${p.hull}  잔차 ${resid(t, p).toFixed(1).padStart(6)}px   변환 (${q.x.toFixed(0)},${q.y.toFixed(0)}) vs 지도 (${Math.round(p.ux)},${Math.round(p.uy)})`);
+for (const r of results) {
+  console.log(`\n----- ${r.cand.name} -----`);
+  if (r.skip) { console.log(`  못 맞춤: ${r.skip}`); continue; }
+  const { t } = r;
+  // 아핀의 선형부를 회전·축척으로 읽는다 — 도면을 얼마나 돌리고 키운 것인지 눈으로 보려고.
+  console.log(`x' = ${t.a.toFixed(6)}·x + ${t.b.toFixed(6)}·y + ${t.c.toFixed(3)}`);
+  console.log(`y' = ${t.d.toFixed(6)}·x + ${t.e.toFixed(6)}·y + ${t.f.toFixed(3)}`);
+  console.log(`축척 ${Math.hypot(t.a, t.d).toFixed(5)} / ${Math.hypot(t.b, t.e).toFixed(5)} · 회전 ${(Math.atan2(t.d, t.a) * 180 / Math.PI).toFixed(2)}°`);
+  console.log(`기준점 ${r.used.length}쌍 (버린 것 ${r.dropped}) · RMS 잔차 ${r.rms.toFixed(1)}px · 최대 ${r.max.toFixed(1)}px`);
 }
 
 // 성공 기준: 배 한 척 폭(26px)보다 작으면 "같은 자리" 로 볼 수 있다.
 const OK = 26;
-console.log(`\n${rms <= OK
-  ? `✅ RMS ${rms.toFixed(1)}px ≤ 배 폭 ${OK}px — 두 좌표계는 아핀으로 이어진다. 변환식을 박아도 된다.`
-  : `❌ RMS ${rms.toFixed(1)}px > 배 폭 ${OK}px — 아핀 가설이 안 맞는다. 계수를 박지 말 것.`}`);
+const best = results.filter(r => !r.skip).sort((a, b) => a.rms - b.rms)[0];
+if (!best) { console.error('\n어느 후보도 못 맞췄다.'); process.exit(1); }
+
+console.log(`\n----- 이긴 후보: ${best.cand.name} -----`);
+console.log(`호선별 잔차 (큰 것부터)`);
+for (const p of [...best.used].sort((x, y) => resid(best.t, y) - resid(best.t, x))) {
+  const q = apply(best.t, p);
+  console.log(`  ${p.hull}  잔차 ${resid(best.t, p).toFixed(1).padStart(6)}px   변환 (${q.x.toFixed(0)},${q.y.toFixed(0)}) vs 지도 (${Math.round(p.ux)},${Math.round(p.uy)})`);
+}
+console.log(`\n${best.rms <= OK
+  ? `✅ RMS ${best.rms.toFixed(1)}px ≤ 배 폭 ${OK}px — ${best.cand.name} 가 우리 지도와 아핀으로 이어진다. 이 계수를 박아도 된다.`
+  : `❌ 두 후보 다 안 맞는다 (제일 나은 것도 RMS ${best.rms.toFixed(1)}px > ${OK}px). 계수를 박지 말 것.`}`);
 process.exit(0);
