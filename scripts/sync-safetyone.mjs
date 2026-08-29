@@ -17,8 +17,8 @@
 import { readFileSync } from 'node:fs';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, connectFirestoreEmulator, collection, getDocs, doc, setDoc, updateDoc, addDoc } from 'firebase/firestore';
-import { parseListText, planMoves, berthOfPos, BERTH_LABEL } from '../src/lib/safetyone-match.mjs';
-import { tmToYard, residualMedian, MAX_RESIDUAL } from '../src/lib/yard-transform.mjs';
+import { parseListText, planMoves, BERTH_LABEL } from '../src/lib/safetyone-match.mjs';
+import { residualMedian, namedRowsFromCoords, MAX_RESIDUAL } from '../src/lib/yard-transform.mjs';
 
 const args = process.argv.slice(2);
 const dry = args.includes('--dry');
@@ -66,19 +66,16 @@ if (capture?.kind === 'coords') {
   //  바꿨으면 여기서 걸린다 — 어긋난 변환으로 배를 옮기는 것이 이 프로젝트의 가장 큰 사고였다.
   const q = residualMedian(rows, live);
   console.log(`변환식 검증 — 짝지은 배 ${q.n}척 · 잔차 중앙값 ${q.median.toFixed(1)}px (허용 ${MAX_RESIDUAL}px)`);
-  if (!q.n || !(q.median <= MAX_RESIDUAL)) {
+  // 짝이 몇 척뿐이면 중앙값에 의미가 없다 — 우연히 맞은 한 척으로 변환식 전체를 승인하게 된다.
+  if (q.n < 8 || !(q.median <= MAX_RESIDUAL)) {
     console.error('변환식이 지금 지도와 안 맞는다. 아무것도 쓰지 않는다.');
     console.error('sync-safetyone.yml 을 mode=fit 으로 돌려 계수를 다시 재고 yard-transform.mjs 를 고칠 것.');
     process.exit(1);
   }
-  const off = [];
-  rows = rows.map(r => {
-    const at = tmToYard(r.tmx, r.tmy);
-    const berth = at && berthOfPos(at);
-    if (!berth) { off.push(r.hull); return { hull: r.hull, loc: '' }; }
-    return { hull: r.hull, loc: BERTH_LABEL[berth], at };
-  });
-  if (off.length) console.log(`⚠ 아는 선석 근처가 아니다(손 안 댐): ${off.join(' ')}`);
+  const named = namedRowsFromCoords(rows, live);
+  rows = named.rows;
+  if (named.off.length) console.log(`⚠ 아는 선석 근처가 아니다(손 안 댐): ${named.off.join(' ')}`);
+  if (named.held.length) console.log(`선석 경계라 지금 선석을 유지: ${named.held.join(' ')}`);
 }
 
 // ★안전장치: 야드에 배가 여러 척인데 **선석이 한 종류뿐**이면 그건 현실이 아니라 오독이다.

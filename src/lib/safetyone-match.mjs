@@ -88,6 +88,11 @@ export function parseListText(text) {
 
 const near = (a, b, d) => Math.abs(a.x - b.x) < d && Math.abs(a.y - b.y) < d;
 
+/** 그 자리에서 이 선석의 가장 가까운 슬롯까지 거리(체비셰프). 선석끼리 견줄 때 쓴다. */
+export function berthDist(pos, id) {
+  return Math.min(...BERTH_SLOTS[id].map(s => Math.max(Math.abs(pos.x - s.x), Math.abs(pos.y - s.y))));
+}
+
 /** 현재 좌표가 어느 선석인가 — 가장 가까운 슬롯 45 이내. 없으면 null. */
 export function berthOfPos(pos) {
   let best = null, bestD = 45;

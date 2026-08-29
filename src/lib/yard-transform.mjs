@@ -20,6 +20,7 @@
  *  대신 **박아 두고 매번 검증한다**(residualMedian). 도면을 다시 그리거나 세이프티원이
  *  좌표계를 바꾸면 잔차가 튀고, 그때 `sync-safetyone.yml` 을 fit 모드로 돌려 다시 잰다.
  */
+import { berthOfPos, berthDist, BERTH_LABEL } from './safetyone-match.mjs';
 
 /** run 15 (2026-08-29) 실측. 기준점 22쌍 · RMS 12.7px · 최대 23.4px. */
 export const TM_TO_YARD = {
@@ -63,7 +64,48 @@ export function residualMedian(rows, live) {
 
 /**
  * 잔차 중앙값이 이보다 크면 변환식을 믿지 않는다.
- * 실측 12.7px 의 세 배 — 정상 오차로는 절대 닿지 않고, 좌표계가 바뀌면 반드시 넘는다
- * (run 14 의 잘못된 후보는 215px 였다).
+ *
+ * ★"실측의 몇 배" 로 정하면 안 된다 — 이 값이 지켜야 하는 건 **선석 판정의 여유**다
+ *  (2026-08-29 적대적 리뷰에서 잡힘). 서로 다른 선석의 최근접 슬롯 쌍은
+ *  2도크(384,458) ↔ 1도크(438,476) 로 체비셰프 54px 뿐이고, 최근접 판정이라 실효
+ *  경계는 그 절반인 27px 다. 좌표가 통째로 그만큼 밀리면 도크 이름이 뒤집힌다.
+ *  실제로 (28,20) = 34.4px 을 먹이면 중앙값 34.4 ≤ 40 이라 예전 값으로는 **가드를
+ *  통과하면서** 8283·8300 이 1도크로 넘어갔다(실측). 20 은 그 27 아래이고 실측
+ *  중앙값 12.7px 대비 1.6배 여유가 있다. 같은 실험을 20px 로 하면 이동 0.
  */
-export const MAX_RESIDUAL = 40;
+export const MAX_RESIDUAL = 20;
+
+/**
+ * 수집한 좌표 행 → 매칭 엔진이 먹는 `{hull, loc, at}` 행.
+ *
+ * 스크립트가 아니라 여기 있는 이유: 이게 **틀리면 배가 엉뚱한 데로 가는 판정**이라
+ * 파이어스토어 없이 그대로 돌려 볼 수 있어야 한다. 실제 코드를 테스트해야 의미가 있다.
+ *
+ * @param rows [{hull, tmx, tmy}]
+ * @param live Map(hull → {x, y})
+ * @returns {rows, off, held} — off: 아는 선석 근처가 아닌 호선 / held: 경계라 이름을 유지한 호선
+ */
+export function namedRowsFromCoords(rows, live) {
+  const off = [], held = [];
+  const out = rows.map(r => {
+    const at = tmToYard(r.tmx, r.tmy);
+    let berth = at && berthOfPos(at);
+    if (!berth) { off.push(r.hull); return { hull: r.hull, loc: '' }; }
+    // ★경계에서는 지금 선석을 유지한다 (2026-08-29 적대적 리뷰에서 잡힌 결함).
+    //  2도크와 1도크는 슬롯 간격이 체비셰프 54px 뿐이라 실효 경계가 27px 인데,
+    //  8300 은 22.0px · 8283 은 23.0px 만 밀려도 이름이 뒤집힌다 — 실측 변환 오차
+    //  최대치(23.4px)와 겹친다. 한 번 뒤집히면 그 자리로 써지고 다음 수집부터
+    //  "그대로" 로 잡혀 **오답이 영구 고착**된다. 로그에는 정상 이동 한 줄로만 남는다.
+    //  그래서 새 선석이 지금 선석보다 확실히(허용 잔차만큼) 가까울 때만 이름을 바꾼다.
+    //  진짜로 도크를 옮긴 배는 두 도크 거리 차가 그보다 훨씬 커서 그대로 잡힌다.
+    const cur = live.get(r.hull);
+    const curBerth = cur ? berthOfPos(cur) : null;
+    if (curBerth && curBerth !== berth &&
+        berthDist(at, curBerth) <= berthDist(at, berth) + MAX_RESIDUAL) {
+      held.push(`${r.hull}(${BERTH_LABEL[berth]}→${BERTH_LABEL[curBerth]})`);
+      berth = curBerth;
+    }
+    return { hull: r.hull, loc: BERTH_LABEL[berth], at };
+  });
+  return { rows: out, off, held };
+}
