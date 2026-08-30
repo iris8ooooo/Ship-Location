@@ -64,7 +64,7 @@ for (let i = 0, k = 0; i < W * H; i++, k += ch)
 // ── 1. 도형 검출 ─────────────────────────────────────────────────
 console.log('\n[1] 도형 검출');
 const shapes = detectShips(mask, W, H).sort((a, b) => a.cy - b.cy || a.cx - b.cx);
-ok(shapes.length === 15, `흰 배 도형 15개 (실제 ${shapes.length})`);
+ok(shapes.length === 16, `흰 배 도형 16개 (실제 ${shapes.length})`);
 // 가장 짧은 도형은 8209 다 — 세이프티원 length 1570 으로 함대 최단이고,
 // 8238(2900) 대비 길이비 0.54 가 그림에서도 그대로 나온다(68/125).
 const shortest = shapes.reduce((a, b) => (a.len < b.len ? a : b));
@@ -99,7 +99,7 @@ const EXPECTED = [
 //  8265(목록에만)가 서로 어긋나 있다 — 함대가 달라도 짝짓기가 버티는지 같이 본다.
 const reg = registerBlobs(shapes, EXPECTED, 45);
 ok(!!reg, '변환을 찾았다');
-ok(reg && reg.pairs.length >= 13, `도형 15개 중 ${reg ? reg.pairs.length : 0}개를 호선에 붙였다`);
+ok(reg && reg.pairs.length >= 14, `도형 16개 중 ${reg ? reg.pairs.length : 0}개를 호선에 붙였다`);
 ok(reg && !reg.pairs.some(p => p.hull === '8265'),
    '목록에만 있고 도면에 없는 8265 를 억지로 붙이지 않는다');
 const scale = reg && Math.hypot(reg.T.a, reg.T.b);
@@ -119,11 +119,37 @@ const near = (h, want) => {
   const d = Math.abs(((v - want + 540) % 360) - 180);
   return d < 20;
 };
-for (const h of ['8206', '8207', '8208', '8254', '8263', '8262']) ok(near(h, 180), `${h} 뱃머리 서쪽`);
+for (const h of ['8206', '8207', '8208', '8246', '8254', '8263', '8262']) ok(near(h, 180), `${h} 뱃머리 서쪽`);
 for (const h of ['8222', '8314', '8315', '8313']) ok(near(h, 270), `${h} 뱃머리 북쪽`);
 ok(!bows.has('8238'), '8238 은 블록꼴이라 방향을 내지 않는다(선석 관례로 넘김)');
 ok(!bows.has('8209'), '8209 도 블록꼴이라 방향을 내지 않는다');
-ok(bows.size === 12, `방향을 낸 호선은 12척 (실제 ${bows.size}) — 나머지는 관례로`);
+ok(bows.size === 13, `방향을 낸 호선은 13척 (실제 ${bows.size}) — 나머지는 관례로`);
+
+
+// ── 5. 축소 내성 ────────────────────────────────────────────────
+// ★라이브 캔버스는 도면 PNG 보다 작게 그려진다(실측 1385x1322, 배 덩어리 500~1153px).
+//  크기 문턱을 900 으로 두는 바람에 실전에서 2개만 통과했다(run 24·25).
+//  여기서 도면을 라이브 크기로 줄여 같은 판정이 나오는지 본다 — 화면 배율이 바뀌어도
+//  안 깨지는지 지키는 검사다. 최근접 축소라 실제보다 거친 조건이다.
+console.log('\n[5] 축소 내성 — 라이브 캔버스 크기에서도 갈리는가');
+function shrink(mask, W, H, w2, h2) {
+  const out = new Uint8Array(w2 * h2);
+  for (let y = 0; y < h2; y++) for (let x = 0; x < w2; x++) {
+    const sx = Math.min(W - 1, Math.round((x * W) / w2));
+    const sy = Math.min(H - 1, Math.round((y * H) / h2));
+    out[y * w2 + x] = mask[sy * W + sx];
+  }
+  return out;
+}
+for (const [w2, h2] of [[1385, 1322], [1180, 1120]]) {
+  const sm = detectShips(shrink(mask, W, H, w2, h2), w2, h2);
+  const tp = sm.flatMap(x => [x.tipLo, x.tipHi]);
+  const mid = tp.filter(t => t > BOW_TIP_MAX && t < BLUNT_TIP_MIN);
+  const gap = Math.min(...tp.filter(t => t >= BLUNT_TIP_MIN)) - Math.max(...tp.filter(t => t <= BOW_TIP_MAX));
+  const read = sm.filter(x => x.bowAt).length;
+  ok(sm.length >= 12 && mid.length === 0 && gap > 0.5,
+     `${w2}x${h2} — 도형 ${sm.length} · 애매 ${mid.length} · 두 무리 간격 ${gap.toFixed(2)} · 방향 ${read}`);
+}
 
 console.log(bad ? `\n❌ ${bad}건 실패` : '\n✅ 전부 통과');
 process.exit(bad ? 1 : 0);
