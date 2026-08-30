@@ -80,20 +80,27 @@ if (capture?.kind === 'coords') {
   // ★뱃머리는 **그림**에서 읽는다 (2026-08-30). 배 레이어의 angle 은 축밖에 말하지 않지만
   //  지도는 선수를 둥글게 · 선미를 네모나게 그린다. 캔버스를 못 받았거나 못 읽으면
   //  조용히 넘어간다 — 위치 수집이 뱃머리 때문에 멈출 이유는 없다.
-  if (capture?.canvasMask) {
-    const { w, h, bits } = capture.canvasMask;
+  const cands = (capture?.canvasMasks ?? []).filter(m => m.bits);
+  if (cands.length) {
     const expected = rows
       .map(r => ({ hull: r.hull, ...(tmToYard(r.tmx, r.tmy) || {}) }))
       .filter(e => Number.isFinite(e.x));
-    const { bows, matched, found } = bowByHull(unpackMask(bits, w * h), w, h, expected);
+    // ★어느 겹이 배 레이어인지 세어 보고 고른다. 화면 구조를 추측하지 않는다.
+    let best = null;
+    for (const m of cands) {
+      const got = bowByHull(unpackMask(m.bits, m.w * m.h), m.w, m.h, expected);
+      console.log(`뱃머리 후보 ${m.w}x${m.h} — 도형 ${got.found} · 붙임 ${got.matched} · 방향 ${got.bows.size}`);
+      if (!best || got.bows.size > best.bows.size) best = got;
+    }
     for (const r of named.rows) {
-      const b = bows.get(r.hull);
+      const b = best.bows.get(r.hull);
       if (b !== undefined) r.bowDeg = b;
     }
-    console.log(`뱃머리 — 도형 ${found} · 호선에 붙임 ${matched} · 방향 읽음 ${bows.size}`
-      + (bows.size ? '' : ' (전부 관례로)'));
+    console.log(best.bows.size
+      ? `뱃머리 — ${best.bows.size}척 읽음, 나머지는 관례로`
+      : '뱃머리 — 한 척도 못 읽었다. 전부 관례로 간다(위치는 정상).');
   } else {
-    console.log('뱃머리 — 지도 캔버스가 없다. 선석 관례로 간다.');
+    console.log('뱃머리 — 쓸 만한 지도 캔버스가 없다. 선석 관례로 간다.');
   }
   rows = named.rows;
   if (named.off.length) console.log(`⚠ 아는 선석 근처가 아니다(손 안 댐): ${named.off.join(' ')}`);
