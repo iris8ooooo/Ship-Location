@@ -1426,11 +1426,14 @@ export default function App() {
             {lastSync !== null && (() => {
               // "몇 시간째 그대로" 와 "수집이 죽음" 이 구분돼야 한다.
               // 기준은 SYNC_STALE_MIN 한 곳에서만 정한다.
+              // ★글귀는 `위치 확인` 이다 (2026-08-30 사용자 지시). `3중점검` 은 세이프티원의
+              //  화면 이름이지 이 칩이 말하는 것이 아니다. `위치 갱신` 도 아니다 — 배가
+              //  안 움직여도 이 시각은 찍히므로 "갱신됐다" 는 사실이 아니다. 확인한 것이다.
               const mins = Math.floor((Date.now() - lastSync) / 60000);
               const label = mins < 60 ? `${mins}분 전` : `${Math.floor(mins / 60)}시간 전`;
               return (
                 <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full whitespace-nowrap ${mins > SYNC_STALE_MIN ? 'bg-red-100 text-red-700' : 'bg-teal-50 text-teal-700'}`}>
-                  3중점검 {label}
+                  위치 확인 {label}
                 </span>
               );
             })()}
