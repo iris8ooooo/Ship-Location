@@ -99,6 +99,18 @@ jobs:
             if [ "$t" = "$a" ] && [ "$a" = "$n" ] && [ "$n" = "$s" ]; then echo "ok    이름 네 곳이 같다"
             else echo "FAIL  이름이 서로 다르다 — 플랫폼마다 다른 이름이 뜬다"
                  echo '이름 네 곳이 다르다' >> /tmp/fail; fi
+            # 4) Cloud Run 은 응답에 Set-Cookie 가 있으면 Cache-Control 을 private 로
+            #    **바꿔 버린다.** 그러면 우리가 준 no-cache 가 사라져 옛 화면이 물린다.
+            #    지금은 쿠키를 안 내보내 no-cache 가 그대로 나가는데, 나중에 세션
+            #    어피니티 같은 걸 켜면 조용히 깨진다. 그래서 검사로 못 박는다.
+            for u in / /manifest.json; do
+              cc=$(curl -sS -o /dev/null -D - "$URL$u" | grep -i '^cache-control' | tr -d '\r' | cut -d' ' -f2- || true)
+              case "$cc" in
+                *no-cache*) echo "ok    $u 가 no-cache ($cc)" ;;
+                *) echo "FAIL  $u 의 cache-control 이 [$cc] — no-cache 가 아니다"
+                   echo "$u cache-control=[$cc]" >> /tmp/fail ;;
+              esac
+            done
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 

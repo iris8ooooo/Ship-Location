@@ -11,6 +11,10 @@
     <!-- 브라우저 탭: SVG 가 가장 선명하다. 못 읽는 브라우저를 위해 PNG 도 같이 준다. -->
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <link rel="icon" type="image/png" sizes="32x32" href="/icon-32.e67b3131.png" />
+    <!-- ★윈도우 크롬의 "바로가기 만들기" 는 manifest 를 아예 읽지 않는다. 아이콘을
+         이 `rel=icon` 목록에서만 고르고, 쓸 만한 게 없으면 제목 첫 글자로 그림을
+         그려 버린다. 32px 만 두면 바탕화면에서 늘어나 뭉개진다. 192 를 같이 준다. -->
+    <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.e67b3131.png" />
     <!-- ★iOS 는 apple-touch-icon 에 SVG 를 못 쓴다. SVG 를 가리켜 두면 아이폰
          홈화면에 우리 아이콘 대신 **페이지 스크린샷**이 박힌다(2026-08-30 실측:
          프로덕션이 /icon.svg 를 가리키고 있었다). 반드시 PNG 여야 한다. -->

@@ -71,7 +71,17 @@ const SAFE = 0.8;
 const svgBuf = readFileSync(SRC);
 const STAMP = createHash('sha256').update(svgBuf).digest('hex').slice(0, 8);
 
-/** 만들 것들. iOS 180 · manifest 192/512 · maskable 512 · 파비콘 폴백 32. */
+/**
+ * 만들 것들. iOS 180 · manifest 192/512 · maskable 512 · 파비콘 폴백 32.
+ *
+ * ★`manifest.json` 의 icons 에 **SVG 를 넣지 말 것.** manifest 는 JSON 이라 주석을
+ *  못 달아서 여기에 적는다. 크롬은 manifest 아이콘으로 SVG 를 정식 지원하는데,
+ *  `sizes:"any"` 인 SVG 는 아이콘 고르기에서 192/512 PNG 를 **밀어내고 주 아이콘이
+ *  된다.** 그러면 안드로이드 홈화면 아이콘이 통째로 SVG 경로를 타고, maskable 분리도
+ *  무의미해진다. 탭 아이콘용 `rel="icon" type="image/svg+xml"` 은 index.html 에만 둔다.
+ * ★한 항목에 `purpose: "any maskable"` 을 같이 쓰지 말 것 — DevTools 가 경고하고,
+ *  하나의 그림이 "안 잘리는 아이콘" 과 "잘리는 아이콘" 을 동시에 잘 해낼 수 없다.
+ */
 const JOBS = [
   { base: 'icon-180', size: 180, safe: 1,    why: 'iOS apple-touch-icon' },
   { base: 'icon-192', size: 192, safe: 1,    why: 'manifest any' },
@@ -83,7 +93,7 @@ for (const j of JOBS) j.out = `${j.base}.${STAMP}.png`;
 
 /** 경로를 박아 둔 곳. 여기 없는 곳에서 아이콘을 참조하면 이름이 바뀔 때 깨진다. */
 const REFS = [
-  { file: join(ROOT, 'index.html'),   bases: ['icon-32', 'icon-180'] },
+  { file: join(ROOT, 'index.html'),   bases: ['icon-32', 'icon-180', 'icon-192'] },
   { file: join(PUB, 'manifest.json'), bases: ['icon-192', 'icon-512', 'icon-maskable-512'] },
 ];
 

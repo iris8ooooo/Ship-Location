@@ -96,6 +96,14 @@ if (capture?.kind === 'coords') {
       const got = bowByHull(unpackMask(m.bits, m.w * m.h), m.w, m.h, expected);
       console.log(`뱃머리 [${m.at ?? '?'} z${m.zoom ?? 0}] ${m.w}x${m.h} — 도형 ${got.found}` +
         ` · 붙임 ${got.matched} · 방향 ${got.bows.size} · 축척 ${got.scale ?? '-'}`);
+      // ★도형이 적으면 **왜** 적은지가 남아야 한다. run 29 는 "도형 0" 만 찍고 끝나서
+      //  너무 확대해 덩어리가 커진 건지, 배가 화면 밖으로 나간 건지 알 수 없었다.
+      //  덩어리 크기 분포를 z0 과 나란히 놓으면 한 노치가 몇 배인지까지 드러난다.
+      if (got.found < 4) {
+        const d = diagnose(unpackMask(m.bits, m.w * m.h), m.w, m.h);
+        console.log(`   진단 — 덩어리 ${d.덩어리} · 크기별 ${JSON.stringify(d.크기별)}` +
+          ` · 큰것 ${d.큰것10.join(' ')} · 캔버스 ${m.w * m.h}px`);
+      }
       for (const r of got.rows ?? [])
         console.log(`   ${r.hull} d=${r.d} len=${r.len} wid=${r.wid} 길이비 ${r.r ?? '-'}` +
           ` tip ${r.lo}/${r.hi} → ${r.bow ?? '판정보류'}`);
