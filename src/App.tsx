@@ -1337,7 +1337,7 @@ export default function App() {
               className="m-0 text-base font-bold text-gray-800 flex items-center gap-2 cursor-pointer select-none flex-wrap"
               onClick={handleTitleTap}
             >
-              <span>이 배가 아닌가벼_HSGINS</span>
+              <span>아따 요 배 아닌갑다잉</span>
               {isAdminUrl && (
                 <span className={`text-xs px-2 py-0.5 rounded text-white whitespace-nowrap ${appMode === 'admin' ? 'bg-blue-600' : 'bg-emerald-600'}`}>
                   {appMode === 'admin' ? '관리자' : '뷰어'}
