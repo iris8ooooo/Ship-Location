@@ -541,25 +541,45 @@ try {
     const base = await grabMask();
     if (base) canvasMasks.push({ ...base, zoom: 0, at: 'base' });
 
-    // 그다음 네 구역을 각각 확대해서 한 장씩. 휠 확대는 마우스 자리를 중심으로 하므로
-    // 끌어서 이동할 필요가 없다 — 볼 곳에 마우스를 두고 확대했다가 되돌리면 된다.
-    const NOTCH = 3;
-    const spots = [[0.3, 0.32], [0.7, 0.32], [0.3, 0.68], [0.7, 0.68]];
-    for (const [fx, fy] of spots) {
-      const mx = box.x + box.w * fx, my = box.y + box.h * fy;
-      try {
-        await page.mouse.move(mx, my);
-        for (let i = 0; i < NOTCH; i++) { await page.mouse.wheel(0, -400); await page.waitForTimeout(220); }
+    // ★확대는 **재서 고른다** — 배수를 찍지 않는다 (2026-08-30).
+    //  처음엔 네 구역을 각각 3노치 확대해서 한 장씩 떴다. 결과가 도형 0~1 이었다
+    //  (run 29). 3노치가 몇 배인지 모르는 채로 고른 값이었다.
+    //
+    //  ★원인을 실측으로 좁혔다 — 도면을 k 배 늘려 라이브 캔버스 크기로 오려내 봤다:
+    //     k=1 통과도형 16 · k=1.5 → 11 · k=2 → 8 · k=3 → 5 · k=4 → 4
+    //   덩어리 크기는 가장 큰 것도 19071px 로 MAX_BLOB_FRAC(36619px) 근처도 못 간다.
+    //   즉 **덩어리가 커서 걸린 게 아니라 배가 화면 밖으로 나간 것**이다. 확대할수록
+    //   보이는 범위가 좁아지고, 남은 배가 서너 척이면 RANSAC 짝짓기가 성립하지 않는다.
+    //   (처음엔 MAX_BLOB_FRAC 을 의심했는데 재 보니 아니었다. 재기 전에 고쳤으면
+    //    엉뚱한 상수를 건드릴 뻔했다.)
+    //  ★그래도 확대는 필요하다. 확대의 목적은 선명함이 아니라 **호선번호 글자보다
+    //   선체를 크게 만드는 것**이다 — 글자는 지도 배율과 무관하게 고정 크기라
+    //   기본 배율에서 선체를 두 동강 낸다(run 29 z0: 붙임 8척이 전부 길이불일치).
+    //   구멍 메우기로는 못 고친다. 글자가 윤곽을 뚫고 나가면 구멍이 아니라 절단이다.
+    //  → 적당히만 확대해야 한다. 그 "적당히" 가 몇 노치인지는 사이트의 노치 배수를
+    //    알아야 하는데 우리가 모른다. 그래서 재서 고른다.
+    //
+    //  그래서 가운데에서 한 노치씩 올리며 각 단계를 한 장씩 뜬다. 합치는 쪽
+    //  (sync-safetyone.mjs)이 호선별로 읽히는 장만 쓰고 서로 어긋나면 버리므로,
+    //  쓸모없는 단계가 섞여도 손해가 없다. 로그의 덩어리 크기를 z0 과 비교하면
+    //  **한 노치가 몇 배인지가 그대로 나온다** — 그걸 보고 다음에 좁히면 된다.
+    //  위 실측대로면 k=1.5~2 근처가 가장 나을 것이다(도형 8~11).
+    const LADDER = 3;
+    const mx = box.x + box.w * 0.5, my = box.y + box.h * 0.5;
+    try {
+      await page.mouse.move(mx, my);
+      for (let z = 1; z <= LADDER; z++) {
+        await page.mouse.wheel(0, -400);
         await page.waitForTimeout(1600);                      // 타일이 다시 그려질 시간
         const m = await grabMask();
-        if (m) canvasMasks.push({ ...m, zoom: NOTCH, at: `${fx},${fy}` });
-      } catch (e) {
-        console.log(`확대 캡처 실패(${fx},${fy}): ${e.message}`);
-      } finally {
-        // 반드시 원래 배율로 되돌린다 — 다음 구역이 이전 확대 위에 겹치면 안 된다.
-        for (let i = 0; i < NOTCH; i++) { await page.mouse.wheel(0, 400); await page.waitForTimeout(220); }
-        await page.waitForTimeout(900);
+        if (m) canvasMasks.push({ ...m, zoom: z, at: 'center' });
       }
+    } catch (e) {
+      console.log(`확대 캡처 실패: ${e.message}`);
+    } finally {
+      // 반드시 원래 배율로 되돌린다. 다음 실행이 이전 확대 위에서 시작하면 안 된다.
+      for (let i = 0; i < LADDER; i++) { await page.mouse.wheel(0, 400); await page.waitForTimeout(220); }
+      await page.waitForTimeout(900);
     }
   }
   for (const m of canvasMasks)
