@@ -36,6 +36,8 @@ export const BLUNT_TIP_MIN = 2.2;
 export const MIN_BLOB_PX = 250;
 /** 배로 보려면 최소한 이만큼 길고 이만큼 홀쭉해야 한다. */
 export const MIN_LEN = 35;
+/** 캔버스의 이 비율보다 큰 흰 덩어리는 배가 아니다(실측: 배 한 척 = 0.14%). */
+export const MAX_BLOB_FRAC = 0.02;
 export const MIN_ASPECT = 2.2;
 
 /**
@@ -43,8 +45,15 @@ export const MIN_ASPECT = 2.2;
  * 실측: 8206 의 length 2990 = 299m → 도면에서 139px. 2990 × 0.04665 = 139.5.
  */
 export const TM_UNIT_TO_YARD = 0.04665;
-/** 잰 길이가 세이프티원이 말한 길이의 이 범위 밖이면 배가 아니다(조각·뭉침). */
-export const LEN_OK_MIN = 0.75, LEN_OK_MAX = 1.3;
+/**
+ * 잰 길이가 세이프티원이 말한 길이의 이 범위 밖이면 배가 아니다(조각·뭉침).
+ *
+ * ★실측으로 정했다. 멀쩡한 도면 15척의 길이비는 **0.898~0.977** 로 몰려 있고,
+ *  라이브에서 글자에 잘린 조각들은 **0.42·0.43·0.44·0.69·0.75·0.77·0.82** 였다.
+ *  사이가 0.82↔0.898 로 비어 있어 그 한가운데인 0.86 을 하한으로 둔다.
+ *  처음 잡은 0.75 는 조각 셋을 통과시켰다 — 그때는 우연히 판정보류로 끝났을 뿐이다.
+ */
+export const LEN_OK_MIN = 0.86, LEN_OK_MAX = 1.3;
 
 const deg = (r) => (r * 180) / Math.PI;
 const norm360 = (a) => ((a % 360) + 360) % 360;
@@ -73,7 +82,10 @@ export function findBlobs(mask, W, H) {
       if (y > 0     && mask[p - W] && !seen[p - W]) { seen[p - W] = 1; stack[sp++] = p - W; }
       if (y < H - 1 && mask[p + W] && !seen[p + W]) { seen[p + W] = 1; stack[sp++] = p + W; }
     }
-    if (pix.length >= MIN_BLOB_PX) out.push(pix);
+    // ★위쪽도 막는다. 실측에서 배 한 척은 캔버스의 0.14% 밖에 안 된다 —
+    //  그보다 훨씬 큰 흰 덩어리(바탕·패널)는 배가 아니고, 모양을 재려 들면
+    //  메모리와 시간만 먹는다.
+    if (pix.length >= MIN_BLOB_PX && pix.length <= W * H * MAX_BLOB_FRAC) out.push(pix);
   }
   return out;
 }
@@ -154,7 +166,11 @@ export function blobShape(pix, W) {
     ts.push(dx * ax + dy * ay);
     ns.push(dx * px + dy * py);
   }
-  const tMin = Math.min(...ts), tMax = Math.max(...ts);
+  // ★`Math.min(...ts)` 로 쓰면 스택이 터진다 — 확대 캡처에서 큰 덩어리가 잡히자
+  //  RangeError: Maximum call stack size exceeded 로 수집이 통째로 죽었다(run 28).
+  //  스프레드는 배열 길이만큼 인자를 밀어 넣는다. 수만 개면 넘친다.
+  let tMin = Infinity, tMax = -Infinity;
+  for (const v of ts) { if (v < tMin) tMin = v; if (v > tMax) tMax = v; }
   const len = tMax - tMin;
   const spanAt = (pos, tol) => {
     let lo = Infinity, hi = -Infinity;

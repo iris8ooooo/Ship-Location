@@ -85,5 +85,21 @@ console.log('\n[3] 버린 이유가 로그에 남는가');
   ok(dropped.length > 0, `길이 불일치로 버린 것이 ${dropped.length}건 — 로그에 이유가 남는다`);
 }
 
+// ── 4. 큰 흰 덩어리가 수집을 죽이지 않는가 ──────────────────────
+// ★run 28 에서 확대 캡처 중 큰 덩어리가 잡히자 blobShape 의 `Math.min(...ts)` 가
+//  RangeError: Maximum call stack size exceeded 로 터져 **수집이 통째로 죽었다.**
+//  스프레드는 배열 길이만큼 인자를 밀어 넣는다 — 수만 개면 넘친다.
+console.log('\n[4] 큰 흰 덩어리 — 터지지 않고 넘어가는가');
+{
+  const big = Uint8Array.from(base);
+  // 캔버스의 한 귀퉁이를 통째로 희게 칠한다(배 한 척은 실측 0.14% 뿐이다).
+  for (let y = 0; y < Math.floor(H * 0.35); y++)
+    for (let x = 0; x < Math.floor(W * 0.35); x++) big[y * W + x] = 1;
+  let threw = null, r = null;
+  try { r = bowByHull(big, W, H, SHIPS); } catch (e) { threw = e; }
+  ok(!threw, `터지지 않는다 (${threw ? threw.message : '정상'})`);
+  ok(r && wrongCount(r.bows) === 0, '그 상황에서도 반대 방향은 안 쓴다');
+}
+
 console.log(bad ? `\n❌ ${bad}건 실패` : '\n✅ 전부 통과');
 process.exit(bad ? 1 : 0);
