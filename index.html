@@ -15,9 +15,10 @@
          이 `rel=icon` 목록에서만 고르고, 쓸 만한 게 없으면 제목 첫 글자로 그림을
          그려 버린다. 32px 만 두면 바탕화면에서 늘어나 뭉개진다. 192 를 같이 준다. -->
     <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.e67b3131.png" />
-    <!-- ★iOS 는 apple-touch-icon 에 SVG 를 못 쓴다. SVG 를 가리켜 두면 아이폰
-         홈화면에 우리 아이콘 대신 **페이지 스크린샷**이 박힌다(2026-08-30 실측:
-         프로덕션이 /icon.svg 를 가리키고 있었다). 반드시 PNG 여야 한다. -->
+    <!-- ★iOS 는 apple-touch-icon 에 **벡터(SVG)를 못 읽는다** — 래스터여야 하고
+         PNG 가 유일하게 안전하다. 2026-08-30 프로덕션이 /icon.svg 를 가리키고 있었다.
+         (그 상태면 iOS 가 페이지 스크린샷을 박을 수 있다고 널리 알려져 있지만
+          Apple 문서에는 없고 우리가 실제 아이폰에서 확인한 것도 아니다 — 추론이다.) -->
     <link rel="apple-touch-icon" href="/icon-180.e67b3131.png" />
     <link rel="manifest" href="/manifest.json" />
     <!-- 안드로이드 주소창·작업전환기 색. manifest 에만 있으면 설치 전에는 안 먹는다. -->
