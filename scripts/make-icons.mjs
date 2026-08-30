@@ -8,9 +8,11 @@
  *  이 스크립트가 직접 고쳐 쓰고, 예전 PNG 는 지운다. 손으로 만질 파일이 없다.
  *
  * ★왜 PNG 를 따로 만드나
- *  iOS 는 `apple-touch-icon` 에 **SVG 를 쓰지 못한다.** 프로덕션이 SVG 를
- *  가리키고 있었고(실측 2026-08-30) 그 상태로 아이폰 홈화면에 추가하면 우리
- *  아이콘 대신 **페이지 스크린샷**이 박힌다. 안드로이드 manifest 도 PNG 가 안전하다.
+ *  iOS 는 `apple-touch-icon` 에 **벡터(SVG)를 못 읽는다.** 래스터여야 하고 PNG 가
+ *  유일하게 안전하다(jpg 는 나중에 아이콘이 검게 변한 사례가 있다).
+ *  2026-08-30 프로덕션이 SVG 를 가리키고 PNG 는 한 장도 없었다 — 여기까지가 잰 것이다.
+ *  그 상태에서 iOS 가 페이지 스크린샷을 박는다는 건 널리 보고되지만 Apple 미문서화이고
+ *  실제 아이폰에서 확인하지는 않았다(추론). 안드로이드 manifest 도 PNG 가 안전하다.
  *
  * ★왜 파일 이름에 해시를 박나  ⭐⭐⭐
  *  iOS 웹클립 아이콘 캐시는 깊다. 같은 이름으로 그림만 갈아 끼우면 지우고 다시
@@ -81,6 +83,9 @@ const STAMP = createHash('sha256').update(svgBuf).digest('hex').slice(0, 8);
  *  무의미해진다. 탭 아이콘용 `rel="icon" type="image/svg+xml"` 은 index.html 에만 둔다.
  * ★한 항목에 `purpose: "any maskable"` 을 같이 쓰지 말 것 — DevTools 가 경고하고,
  *  하나의 그림이 "안 잘리는 아이콘" 과 "잘리는 아이콘" 을 동시에 잘 해낼 수 없다.
+ *  ★단 이유는 **Chrome/안드로이드의 크롭**이지 Safari 가 아니다. WebKit 은 purpose 를
+ *  공백으로 쪼개 합집합으로 담아서 `"any maskable"` 도 any 를 포함한다 — Safari 기준
+ *  실격이 아니었다. 옛 아이콘이 안 나온 원인은 apple-touch-icon 이 SVG 였던 것뿐이다.
  */
 const JOBS = [
   { base: 'icon-180', size: 180, safe: 1,    why: 'iOS apple-touch-icon' },
