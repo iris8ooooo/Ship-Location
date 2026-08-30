@@ -281,6 +281,7 @@ export default function App() {
           //  이벤트로 오지는 않는다(실측: 손가락 두 개가 거의 동시에 닿으면 touches=1
           //  짜리 하나만 온다). touchstart 에만 기대면 그때 핀치가 통째로 죽는다.
           if (!pinchRef.current) {
+            cancelFly(containerRef.current);
             pinchRef.current = { dist, zoom: zoomRef.current };
             pinchingRef.current = true;
             cancelHoldRef.current?.();
@@ -306,6 +307,9 @@ export default function App() {
         }
       };
       const onTouchEndNative = (e: TouchEvent) => {
+        // ★기준 버리기를 React 의 onTouchEnd 에만 맡기면 안 된다. 그건 touchcancel 을
+        //  안 받는다 — 취소로 끝난 핀치의 기준이 남아 다음 핀치가 옛 기준으로 튄다.
+        if (e.touches.length < 2) { pinchRef.current = null; pinchingRef.current = false; }
         pan = e.touches.length === 1 && !shipBusy()
           ? { x: e.touches[0].clientX, y: e.touches[0].clientY }   // 핀치 뒤 남은 손가락
           : null;
@@ -376,6 +380,25 @@ export default function App() {
   const zoomRef = useRef(zoom);
   useEffect(() => { zoomRef.current = zoom; }, [zoom]);
   const flyingRef = useRef(false);
+  /** 진행 중인 이동에 붙는 번호. 새 이동이 시작되면 값이 바뀌고, 이전 프레임 루프는
+   *  다음 프레임에 스스로 물러난다. ★예전에는 이동 중이면 새 요청을 **버렸다** —
+   *  620ms 안에 다른 버튼을 누르면 그 누름이 통째로 사라져 "가끔 전체가 안 먹힌다" 가 됐다
+   *  (실측: 1안벽 누르고 500ms 뒤 전체 → 전체 무시. 700ms 뒤면 정상).
+   *  사용자가 "다른 버튼 눌렀다 다시 전체" 로 풀던 것도 그 사이에 620ms 가 지나서였다. */
+  const flySeqRef = useRef(0);
+  /** 이동을 이어받을 때 원래 transition 을 잃지 않도록 따로 둔다. */
+  const flyRestoreRef = useRef('');
+  /** 돌고 있는 이동을 물린다. 손으로 확대하거나 지도를 세울 때 부른다. */
+  const cancelFly = (inner: HTMLElement | null) => {
+    if (!flyingRef.current) return;
+    flySeqRef.current++;
+    flyingRef.current = false;
+    if (inner) inner.style.transition = flyRestoreRef.current;
+    // ★멈춘 자리의 배율을 React 에도 알린다. 이동 중에는 DOM 에만 직접 쓰므로 상태는
+    //  아직 이동 전 값이다 — 그대로 두면 다음 리렌더가 옛 배율로 transform 을 다시 써서
+    //  지도가 뒤로 튄다.
+    setZoom(zoomRef.current);
+  };
   const applyZoomAtRef = useRef<((z: number, ax: number, ay: number) => void) | null>(null);
   const cancelHoldRef = useRef<(() => void) | null>(null);
   const showArmedRef = useRef<((el: HTMLElement | null) => void) | null>(null);
@@ -393,6 +416,8 @@ export default function App() {
     if (!node || !inner || !wrap) return;
     const z0 = zoomRef.current;
     if (!z0) return;
+    // 손으로 확대하기 시작했으면 돌고 있던 이동은 물러난다. 안 그러면 매 프레임 서로 덮어쓴다.
+    cancelFly(inner);
     const r = rotRef.current;
     // 손가락 아래에 있던 지도 좌표. 회전이 걸려 있으면 되돌려서 읽어야 한다.
     const m = contentToMap(node.scrollLeft + ax, node.scrollTop + ay, z0, r);
@@ -423,7 +448,8 @@ export default function App() {
     const node = viewportRef.current;
     const inner = containerRef.current;
     const wrap = inner?.parentElement as HTMLElement | null;
-    if (!node || !inner || !wrap || flyingRef.current) return;
+    if (!node || !inner || !wrap) return;
+    cancelFly(inner);                       // 이동 중이어도 버리지 않는다 — 물리고 돌린다
     const z = zoomRef.current;
     const r0 = rotRef.current;
     const vw = node.clientWidth, vh = node.clientHeight;
@@ -448,7 +474,7 @@ export default function App() {
     const node = viewportRef.current;
     const inner = containerRef.current;
     const wrap = inner?.parentElement as HTMLElement | null;
-    if (!node || !inner || !wrap || flyingRef.current) return;
+    if (!node || !inner || !wrap) return;
 
     const vw = node.clientWidth, vh = node.clientHeight;
     const rr = rotRef.current;
@@ -473,9 +499,12 @@ export default function App() {
     const sl0 = node.scrollLeft, st0 = node.scrollTop;
     const cx = r.x + r.w / 2, cy = r.y + r.h / 2;
 
+    // 돌고 있던 이동이 있으면 그 루프를 물리고 여기서 이어받는다. 원래 transition 은
+    // 처음 시작할 때 한 번만 붙잡는다 — 이어받을 때 다시 읽으면 'none' 을 원본으로 오해한다.
+    if (!flyingRef.current) flyRestoreRef.current = inner.style.transition;
+    const seq = ++flySeqRef.current;
     flyingRef.current = true;
     userMovedRef.current = true;   // 지역 버튼으로 옮겼으면 첫 화면으로 되돌리지 않는다
-    const prevTransition = inner.style.transition;
     inner.style.transition = 'none';                   // CSS 전환과 겹치지 않게
 
     const DUR = 620;
@@ -484,9 +513,13 @@ export default function App() {
       t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 
     const step = (now: number) => {
+      if (flySeqRef.current !== seq) return;           // 새 목적지가 생겼다 — 이 루프는 물러난다
       const p = Math.min(1, (now - t0) / DUR);
       const e = easeInOutCubic(p);
       const z = z0 + (z1 - z0) * e;
+      // ★배율 ref 를 매 프레임 최신으로 둔다. 예전에는 끝날 때 한 번만 반영해서,
+      //  이동 도중에 핀치하거나 다른 버튼을 누르면 **이동 전 배율**을 기준으로 삼아 튀었다.
+      zoomRef.current = z;
 
       // 크기를 먼저 넓힌 뒤 스크롤해야 목표가 잘리지 않는다.
       const cs = contentSize(z, rr);
@@ -498,7 +531,7 @@ export default function App() {
       node.scrollTop  = Math.max(0, Math.min(cs.h - vh, c.y - vh / 2));
 
       if (p < 1) { requestAnimationFrame(step); return; }
-      inner.style.transition = prevTransition;
+      inner.style.transition = flyRestoreRef.current;
       flyingRef.current = false;
       setZoom(z1);                                     // 최종 상태만 React 에 반영
     };
@@ -1258,6 +1291,8 @@ export default function App() {
       panRef.current = null;
       draggingRef.current = null;
       showArmed(null);
+      // 손가락 아래에서 지도가 계속 날아가면 안 된다. 기준 배율도 지금 이 자리 값으로 잡힌다.
+      cancelFly(containerRef.current);
       pinchingRef.current = true;
       const dist = Math.hypot(
         e.touches[0].clientX - e.touches[1].clientX,

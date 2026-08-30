@@ -123,22 +123,40 @@ function tiersFor(zoom: number): Set<string> {
   return t;
 }
 
+/**
+ * ★렌더마다 새 객체를 넘기면 안 된다 (2026-08-30 실측).
+ *  React 19 는 `dangerouslySetInnerHTML` 을 **객체 동일성**으로 비교한다. `{__html: mapSvg}`
+ *  를 JSX 안에서 만들면 문자열이 같아도 매 렌더 새 객체라, React 가 innerHTML 을 통째로
+ *  다시 쓴다 — 지도 SVG 가 전부 새 노드로 갈린다.
+ *  그 순간 **손가락 아래에 있던 <path> 가 문서에서 뜯겨 나가고**, 브라우저는 그 터치의
+ *  touchmove 를 더 이상 배달하지 않는다. 그래서 핀치가 한 프레임만 움직이고 죽었다.
+ *  실측(iPhone14 크기, 손가락 300→60px 6단계): 배달된 touchmove **1/6**, 배율 1.788→1.550.
+ *  모듈 상수로 한 번만 만들어 두면 React 가 건너뛴다 → **6/6**, 배율 1.788→0.358(손가락 그대로).
+ *  ★"지도가 많이 축소되면 그때부터는 또 된다" 도 같은 원인이다 — 축소하면 손가락이
+ *   SVG 밖(뷰포트 바탕)에 닿을 확률이 높고, 그 요소는 안 갈리므로 제스처가 살아남는다.
+ */
+const MAP_HTML = { __html: mapSvg };
+
 export default function YardMap({ zoom = 1 }: { zoom?: number }) {
   const host = useRef<HTMLDivElement>(null);
 
+  // 배율이 조금 흔들릴 때마다 라벨 수십 개의 style 을 다시 쓸 이유가 없다.
+  // 실제로 바뀌는 건 단계뿐이라 그 서명이 달라질 때만 돈다 — 핀치 한 번에
+  // 수백 번 돌던 것이 경계를 넘을 때 한 번으로 줄어든다.
+  const tierKey = [...tiersFor(zoom)].join(',');
   useEffect(() => {
-    const on = tiersFor(zoom);
+    const on = new Set(tierKey.split(','));
     host.current?.querySelectorAll<SVGElement>('[data-tier]').forEach(g => {
       g.style.display = on.has(g.dataset.tier ?? '') ? '' : 'none';
     });
-  }, [zoom]);
+  }, [tierKey]);
 
   return (
     <div
       ref={host}
       className="absolute inset-0 w-full h-full [&>svg]:w-full [&>svg]:h-full [&>svg]:block"
       aria-label="HD현대삼호 야드 배치도"
-      dangerouslySetInnerHTML={{ __html: mapSvg }}
+      dangerouslySetInnerHTML={MAP_HTML}
     />
   );
 }
