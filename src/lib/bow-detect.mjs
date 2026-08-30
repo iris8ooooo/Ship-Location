@@ -335,12 +335,24 @@ export function unpackMask(b64, n) {
  * 각도를 그대로 쓰지 않는 이유: 도면은 26.7° 기울어 그려져 있어 그대로 쓰면
  * 배가 비스듬히 눕는다. 축은 angle 이 정확히 알려주므로 거기에 스냅한다.
  */
+/**
+ * 마커 회전각 `r` 일 때 **뱃머리가 향하는 야드각**(0=동 90=남 180=서 270=북).
+ *
+ * ★`r` 과 뱃머리 각은 **같은 값이 아니다** — 90° 어긋난다(r=90 이면 뱃머리는 동쪽).
+ *  로그에 `r` 을 그대로 "뱃머리" 라고 찍었다가 읽은 값과 90° 어긋나 보였다.
+ *  수치는 맞았는데 **표시가 틀려서** 사람이 잘못 판단할 뻔했다. 그래서 변환을
+ *  여기 한 곳에 두고 `headingFromBow` 와 같이 쓴다 — 둘이 어긋날 수가 없다.
+ */
+export function bowFromHeading(r) {
+  const rad = ((((r ?? 0) % 360) + 360) % 360) * Math.PI / 180;
+  return norm360(deg(Math.atan2(-Math.cos(rad), Math.sin(rad))));
+}
+
 export function headingFromBow(bowDeg, axisR) {
   const axis = (((axisR ?? 0) % 180) + 180) % 180;
   let best = null, bestD = Infinity;
   for (const r of [axis, axis + 180]) {
-    const rad = (r * Math.PI) / 180;
-    const dir = norm360(deg(Math.atan2(-Math.cos(rad), Math.sin(rad))));   // r 일 때 뱃머리가 향하는 각
+    const dir = bowFromHeading(r);                    // r 일 때 뱃머리가 향하는 각
     const d = Math.abs(((dir - bowDeg + 540) % 360) - 180);
     if (d < bestD) { bestD = d; best = r % 360; }
   }

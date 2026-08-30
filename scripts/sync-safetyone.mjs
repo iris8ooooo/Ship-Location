@@ -19,7 +19,7 @@ import { initializeApp } from 'firebase/app';
 import { getFirestore, connectFirestoreEmulator, collection, getDocs, doc, setDoc, updateDoc, addDoc } from 'firebase/firestore';
 import { parseListText, planMoves, BERTH_LABEL } from '../src/lib/safetyone-match.mjs';
 import { residualMedian, namedRowsFromCoords, MAX_RESIDUAL, tmToYard } from '../src/lib/yard-transform.mjs';
-import { bowByHull, unpackMask, diagnose } from '../src/lib/bow-detect.mjs';
+import { bowByHull, unpackMask, diagnose, bowFromHeading } from '../src/lib/bow-detect.mjs';
 
 const args = process.argv.slice(2);
 const dry = args.includes('--dry');
@@ -120,8 +120,22 @@ if (capture?.kind === 'coords') {
       const b = seen.get(r.hull);
       if (b !== undefined && b !== null) { r.bowDeg = b; n++; }
     }
-    console.log(n ? `뱃머리 — ${n}척 읽음, 나머지는 관례로`
-                  : '뱃머리 — 한 척도 못 읽었다. 전부 관례로 간다(위치는 정상).');
+    if (n) {
+      // ★사람이 보고 판단하려면 호선별 각도가 있어야 한다. "N척 읽음" 만으로는
+      //  맞는지 틀린지 알 수가 없다.
+      const read = [...seen].filter(([, b]) => b !== null && b !== undefined)
+                            .sort((a, b) => a[0].localeCompare(b[0]));
+      console.log(`뱃머리 — ${n}척 읽음, 나머지는 관례로:`);
+      for (const [hull, b] of read) {
+        const d = ((Math.round(b) % 360) + 360) % 360;
+        const w = d < 45 || d >= 315 ? '동' : d < 135 ? '남' : d < 225 ? '서' : '북';
+        console.log(`   ${hull} 뱃머리 ${d}° ${w}`);
+      }
+      const dropped = [...seen].filter(([, b]) => b === null).map(([h]) => h);
+      if (dropped.length) console.log(`   (두 장이 어긋나 버린 호선: ${dropped.join(' ')})`);
+    } else {
+      console.log('뱃머리 — 한 척도 못 읽었다. 전부 관례로 간다(위치는 정상).');
+    }
   } else {
     console.log('뱃머리 — 쓸 만한 지도 캔버스가 없다. 선석 관례로 간다.');
   }
@@ -145,8 +159,26 @@ if (capture?.kind === 'coords') {
 const plan = planMoves(rows, live);
 const now = Date.now();
 
-for (const m of plan.moves)
-  console.log(`이동  ${m.hull}  (${Math.round(m.from.x)},${Math.round(m.from.y)}) → ${BERTH_LABEL[m.berth]} (${m.to.x},${m.to.y})`);
+// 야드각을 사람이 읽는 방위로. 0=동 90=남 180=서 270=북 (test-bow-detect 기준).
+const dir = (deg) => {
+  if (!Number.isFinite(deg)) return '?';
+  const d = ((Math.round(deg) % 360) + 360) % 360;
+  const near = [[0, '동'], [90, '남'], [180, '서'], [270, '북'], [360, '동']]
+    .reduce((a, b) => (Math.abs(b[0] - d) < Math.abs(a[0] - d) ? b : a));
+  return Math.abs(near[0] - d) <= 20 ? `${d}° ${near[1]}` : `${d}°`;
+};
+for (const m of plan.moves) {
+  const moved = Math.round(m.from.x) !== m.to.x || Math.round(m.from.y) !== m.to.y;
+  // ★제자리 회전(뱃머리)이면 좌표가 아니라 **각도**가 요점이다. 그걸 보여 줘야
+  //  사람이 "이 배 뱃머리가 저쪽이 맞나" 를 판단할 수 있다.
+  // ★`r` 은 마커 회전각이지 뱃머리 각이 아니다(90° 차이). 반드시 변환해서 찍는다 —
+  //  그대로 찍으면 위의 "읽은 뱃머리" 와 90° 어긋나 보여 사람이 오판한다.
+  const turn = Number.isFinite(m.from.r) && m.from.r !== m.to.r
+    ? `  뱃머리 ${dir(bowFromHeading(m.from.r))} → ${dir(bowFromHeading(m.to.r))}` : '';
+  console.log(`이동  ${m.hull}  (${Math.round(m.from.x)},${Math.round(m.from.y)})` +
+    ` → ${BERTH_LABEL[m.berth]} (${m.to.x},${m.to.y})${moved ? '' : ' [제자리]'}` +
+    `${m.reason ? ` <${m.reason}>` : ''}${turn}`);
+}
 for (const c of plan.creates)
   console.log(`추가  ${c.hull}  → ${BERTH_LABEL[c.berth]} (${c.to.x},${c.to.y})`);
 console.log(`그대로 ${plan.skips.length} · 시운전/출항 ${plan.sea.length} · 리스트 밖(손 안 댐) ${plan.untouched.length}`);
