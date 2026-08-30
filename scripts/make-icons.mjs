@@ -29,7 +29,7 @@
  *  늘릴 이유가 없다. Chromium 이 SVG 를 정확히 그려 주므로 결과도 낫다.
  */
 import { chromium } from 'playwright';
-import { readFileSync, writeFileSync, readdirSync, unlinkSync } from 'node:fs';
+import { readFileSync, writeFileSync, readdirSync, unlinkSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -37,6 +37,15 @@ import { dirname, join } from 'node:path';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PUB = join(ROOT, 'public');
 const SRC = join(PUB, 'icon.svg');
+/**
+ * maskable 전용 원본. 있으면 maskable PNG 는 이걸로 굽는다.
+ *
+ * ★기계적으로 `icon.svg` 를 80% 로 줄이는 것보다 낫다. 이 파일은 배경이 **풀블리드**
+ *  (둥근 모서리 없음)이고 콘텐츠만 80% 안에 들어가 있어서, 안드로이드가 어떤 모양으로
+ *  잘라도 배경이 끝까지 이어진다. 축소 방식은 배경까지 같이 줄어 테두리에 단차가 남는다.
+ *  없으면 예전처럼 `icon.svg` 를 SAFE 비율로 줄여서 만든다.
+ */
+const SRC_MASK = join(PUB, 'icon-maskable.svg');
 
 /**
  * 투명한 자리를 채울 바탕색.
@@ -45,11 +54,16 @@ const SRC = join(PUB, 'icon.svg');
  *  모서리가 둥근 사각형이라 네 귀퉁이가 투명한데, 그대로 두면 아이폰에서 검은
  *  귀퉁이가 생기고 그 위에 iOS 가 자기 둥근 마스크를 또 씌워 지저분해진다.
  *  꽉 채워서 넘긴다.
- *  아이콘을 바꾸면 이 색도 새 그림의 바탕색으로 같이 바꾼다 — 안 바꾸면 귀퉁이에
- *  색 단차가 남는다. 잊지 않도록 **아래에서 실제 그림 가장자리 색을 재서 비교**하고
- *  다르면 크게 찍는다. 급하면 `ICON_BG=#rrggbb` 로 덮어쓸 수 있다.
+ *  아이콘을 바꾸면 이 값도 새 그림의 바탕에 맞춘다 — 안 바꾸면 귀퉁이에 색 단차가
+ *  남는다. 잊지 않도록 **아래에서 배경과 그림의 같은 자리 픽셀을 직접 재서 비교**하고
+ *  다르면 크게 찍는다. 급하면 `ICON_BG=...` 로 덮어쓸 수 있다.
+ *
+ * ★단색이 아니라 **CSS background 값 무엇이든** 된다. 지금 그림은 바탕이 위아래
+ *  그라디언트(#e6f0f8→#bed6e9, 양 끝이 40 차이)라 단색으로는 위아래 중 한쪽이 반드시
+ *  어긋난다. 그래서 같은 그라디언트를 깐다.
+ *  (2026-08-30 실측: 옛 단색 #0284c7 을 그대로 뒀더니 검사가 188 차이로 잡아냈다.)
  */
-const BG = process.env.ICON_BG || '#0284c7';
+const BG = process.env.ICON_BG || 'linear-gradient(#e6f0f8, #bed6e9)';
 
 /** 이 이상 벌어지면 귀퉁이 단차가 눈에 보인다(채널당 0~255). */
 const BG_TOL = 16;
@@ -71,7 +85,12 @@ const SAFE = 0.8;
 
 /** 그림이 바뀌면 이름이 바뀐다. 위 "왜 해시를 박나" 참고. */
 const svgBuf = readFileSync(SRC);
-const STAMP = createHash('sha256').update(svgBuf).digest('hex').slice(0, 8);
+const maskBuf = existsSync(SRC_MASK) ? readFileSync(SRC_MASK) : null;
+// ★두 원본을 **둘 다** 해시에 넣는다. maskable 만 고쳤는데 이름이 그대로면 안드로이드가
+//  바뀐 걸 못 알아채고 옛 아이콘을 계속 쓴다.
+const STAMP = createHash('sha256')
+  .update(svgBuf).update(maskBuf ?? Buffer.alloc(0))
+  .digest('hex').slice(0, 8);
 
 /**
  * 만들 것들. iOS 180 · manifest 192/512 · maskable 512 · 파비콘 폴백 32.
@@ -91,7 +110,8 @@ const JOBS = [
   { base: 'icon-180', size: 180, safe: 1,    why: 'iOS apple-touch-icon' },
   { base: 'icon-192', size: 192, safe: 1,    why: 'manifest any' },
   { base: 'icon-512', size: 512, safe: 1,    why: 'manifest any (큰 것)' },
-  { base: 'icon-maskable-512', size: 512, safe: SAFE, why: 'manifest maskable' },
+  { base: 'icon-maskable-512', size: 512, safe: maskBuf ? 1 : SAFE, mask: true,
+    why: maskBuf ? 'manifest maskable (전용 원본)' : 'manifest maskable (icon.svg 축소)' },
   { base: 'icon-32',  size: 32,  safe: 1,    why: '파비콘 PNG 폴백' },
 ];
 for (const j of JOBS) j.out = `${j.base}.${STAMP}.png`;
@@ -103,6 +123,7 @@ const REFS = [
 ];
 
 const dataUri = `data:image/svg+xml;base64,${svgBuf.toString('base64')}`;
+const maskUri = maskBuf ? `data:image/svg+xml;base64,${maskBuf.toString('base64')}` : dataUri;
 
 // 이 레포의 playwright 버전이 이 기계에 깔린 크로미움 리비전과 다를 수 있다.
 // 그럴 때 `npx playwright install` 을 시키는 대신 이미 있는 실행파일을 가리킨다.
@@ -110,37 +131,52 @@ const dataUri = `data:image/svg+xml;base64,${svgBuf.toString('base64')}`;
 const exe = process.env.CHROMIUM_PATH;
 const browser = await chromium.launch(exe ? { executablePath: exe } : {});
 try {
-  // ── 바탕색이 그림과 맞는지 먼저 잰다 ──────────────────────────────
-  // 둥근 모서리 **안쪽**으로 조금 들어온 네 점을 읽는다. 모서리 자체는 투명해서
-  // 아무것도 알려주지 않는다. 여기가 곧 PNG 귀퉁이와 맞닿는 색이다.
-  const probePage = await browser.newPage({ viewport: { width: 64, height: 64 } });
-  await probePage.setContent('<body style="margin:0">');
-  const edges = await probePage.evaluate(async (uri) => {
-    const im = new Image();
-    im.src = uri;
-    await im.decode();
-    const c = document.createElement('canvas');
-    c.width = c.height = 64;
-    const g = c.getContext('2d');
-    g.drawImage(im, 0, 0, 64, 64);
-    const d = g.getImageData(0, 0, 64, 64).data;
-    // rx=112/512 = 22% → 64px 기준 14px. 그보다 안쪽인 20px 지점을 읽는다.
-    return [[20, 1], [43, 1], [20, 62], [43, 62]].map(([x, y]) => {
-      const i = (y * 64 + x) * 4;
-      return [d[i], d[i + 1], d[i + 2], d[i + 3]];
-    });
-  }, dataUri);
-  await probePage.close();
+  // ── 바탕이 그림과 맞는지 먼저 잰다 ────────────────────────────────
+  // ★단색이든 그라디언트든 통하게, **같은 자리의 배경 픽셀과 그림 픽셀을 직접 비교**한다.
+  //  hex 를 파싱해 비교하면 그라디언트에서는 아예 못 잰다.
+  //  재는 자리는 둥근 모서리 **안쪽**으로 조금 들어온 네 점 — 모서리 자체는 투명해서
+  //  아무것도 알려주지 않는다. 여기가 곧 PNG 귀퉁이와 맞닿는 색이다.
+  //  (rx=114/512 = 22% → 64px 기준 14px. 그보다 안쪽인 20px 지점을 읽는다.)
+  const PROBE_PTS = [[20, 1], [43, 1], [20, 62], [43, 62]];
+  const sample = async (uri) => {
+    const pg = await browser.newPage({ viewport: { width: 64, height: 64 } });
+    await pg.setContent('<body style="margin:0">');
+    const out = await pg.evaluate(async ({ uri, pts }) => {
+      const im = new Image();
+      im.src = uri;
+      await im.decode();
+      const c = document.createElement('canvas');
+      c.width = c.height = 64;
+      const g = c.getContext('2d');
+      g.drawImage(im, 0, 0, 64, 64);
+      const d = g.getImageData(0, 0, 64, 64).data;
+      return pts.map(([x, y]) => { const i = (y * 64 + x) * 4; return [d[i], d[i + 1], d[i + 2], d[i + 3]]; });
+    }, { uri, pts: PROBE_PTS });
+    await pg.close();
+    return out;
+  };
 
-  const bg = [1, 3, 5].map((i) => parseInt(BG.slice(i, i + 2), 16));
-  const opaque = edges.filter((e) => e[3] > 250);
-  const far = opaque.map((e) => Math.max(...bg.map((v, i) => Math.abs(v - e[i]))));
+  // 그림 — 투명 배경 위에 그대로 그린다.
+  const art = await sample(dataUri);
+  // 배경 — 실제로 칠해진 픽셀을 읽어야 그라디언트도 잡힌다. 배경만 찍어서 다시 읽는다.
+  const bgPage = await browser.newPage({ viewport: { width: 64, height: 64 } });
+  await bgPage.setContent(`<html><body style="margin:0;width:64px;height:64px;background:${BG}"></body></html>`);
+  const bgShot = await bgPage.screenshot({ type: 'png' });
+  await bgPage.close();
+  const bg = await sample(`data:image/png;base64,${bgShot.toString('base64')}`);
+
   const hex = (e) => '#' + e.slice(0, 3).map((v) => v.toString(16).padStart(2, '0')).join('');
-  console.log(`바탕색 BG=${BG} · 그림 가장자리 ${opaque.map(hex).join(' ')}`);
-  if (far.length && Math.min(...far) > BG_TOL) {
-    console.log(`★BG 가 그림과 다르다(가장 가까운 모서리도 ${Math.min(...far)} 차이). ` +
-                `귀퉁이에 색 단차가 남는다 — BG 를 위 색 중 하나로 바꿔라.`);
-  }
+  // 그 자리가 투명하면 비교할 것이 없다 — 불투명한 점만 본다.
+  const diffs = art
+    .map((a, i) => (a[3] > 250 ? Math.max(...[0, 1, 2].map((k) => Math.abs(a[k] - bg[i][k]))) : null))
+    .filter((v) => v !== null);
+  console.log(`바탕 BG=${BG}`);
+  console.log(`  그림 가장자리  ${art.map(hex).join(' ')}`);
+  console.log(`  배경 같은 자리 ${bg.map(hex).join(' ')}`);
+  console.log(`  차이 ${diffs.join(' ')} (허용 ${BG_TOL})`);
+  if (diffs.length && Math.max(...diffs) > BG_TOL)
+    console.log(`★BG 가 그림과 다르다(최대 ${Math.max(...diffs)} 차이). 귀퉁이에 색 단차가 남는다 — ` +
+                `BG 를 그림 바탕과 같게 맞춰라.`);
 
   // ── PNG 굽기 ─────────────────────────────────────────────────────
   for (const j of JOBS) {
@@ -151,7 +187,7 @@ try {
     const pad = ((1 - j.safe) / 2) * 100;
     await page.setContent(
       `<html><body style="margin:0;width:${j.size}px;height:${j.size}px;background:${BG}">
-         <img src="${dataUri}"
+         <img src="${j.mask ? maskUri : dataUri}"
               style="position:absolute;left:${pad}%;top:${pad}%;
                      width:${j.safe * 100}%;height:${j.safe * 100}%;display:block">
        </body></html>`,
