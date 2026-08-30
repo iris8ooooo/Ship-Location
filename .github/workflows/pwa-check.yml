@@ -1,0 +1,55 @@
+name: PWA check
+
+# 홈화면/바탕화면 설치 때 쓰이는 것들을 **프로덕션에서 실제로** 확인한다.
+# 이 레포를 만지는 세션은 샌드박스라 run.app 에 직접 못 닿는다 — 여기가 유일한 눈이다.
+#
+# 읽기만 한다. 앱은 공개 URL 이라 새로 새는 정보가 없다.
+
+on:
+  workflow_dispatch:
+
+env:
+  URL: https://hd-ship-location-238928524992.us-west1.run.app
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 프로덕션이 내보내는 설치 정보
+        run: |
+          set -o pipefail
+          {
+            echo "## 프로덕션 설치 정보 (`date -u +%FT%TZ`)"
+            echo
+            echo '### index.html 헤더'
+            echo '```'
+            curl -sS -D - -o /tmp/index.html "$URL/" | grep -iE '^(HTTP|cache-control|last-modified|etag|content-type)' || true
+            echo '```'
+            echo
+            echo '### 설치 이름·아이콘 관련 태그'
+            echo '```'
+            grep -oiE '<title>[^<]*</title>' /tmp/index.html || echo '(title 없음)'
+            grep -oiE '<meta[^>]*apple-mobile-web-app-title[^>]*>' /tmp/index.html || echo '(apple-mobile-web-app-title 없음)'
+            grep -oiE '<meta[^>]*name="theme-color"[^>]*>' /tmp/index.html || echo '(theme-color 없음)'
+            grep -oiE '<link[^>]*apple-touch-icon[^>]*>' /tmp/index.html || echo '(apple-touch-icon 없음)'
+            grep -oiE '<link[^>]*rel="icon"[^>]*>' /tmp/index.html || echo '(favicon link 없음)'
+            grep -oiE '<link[^>]*rel="manifest"[^>]*>' /tmp/index.html || echo '(manifest link 없음)'
+            echo '```'
+            echo
+            echo '### manifest.json'
+            echo '```'
+            curl -sS -D /tmp/mh "$URL/manifest.json" | head -40
+            echo '--- 헤더 ---'
+            grep -iE '^(HTTP|cache-control|content-type)' /tmp/mh || true
+            echo '```'
+            echo
+            echo '### 아이콘 파일 (있는 것만)'
+            echo '```'
+            for f in /icon.svg /icon-180.png /icon-192.png /icon-512.png /icon-maskable-512.png /favicon.ico; do
+              code=$(curl -sS -o /tmp/ic -w '%{http_code}' "$URL$f")
+              size=$(wc -c < /tmp/ic)
+              ctype=$(curl -sS -o /dev/null -D - "$URL$f" | grep -i '^content-type' | tr -d '\r' || true)
+              echo "$f  → $code  ${size}B  ${ctype:-(content-type 없음)}"
+            done
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
