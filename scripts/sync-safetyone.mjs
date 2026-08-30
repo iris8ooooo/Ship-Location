@@ -90,7 +90,11 @@ if (capture?.kind === 'coords') {
     for (const m of cands) {
       const mask = unpackMask(m.bits, m.w * m.h);
       const got = bowByHull(mask, m.w, m.h, expected);
-      console.log(`뱃머리 후보 ${m.w}x${m.h} — 도형 ${got.found} · 붙임 ${got.matched} · 방향 ${got.bows.size}`);
+      console.log(`뱃머리 후보 ${m.w}x${m.h} — 도형 ${got.found} · 붙임 ${got.matched}` +
+        ` · 방향 ${got.bows.size} · 축척 ${got.scale ?? '-'} · 안붙음 ${got.unmatched ?? '-'}`);
+      // 붙은 배별 수치. 방향이 안 나오면 여기 lo/hi 가 둘 다 크게 찍힌다(= 양끝 뭉툭).
+      for (const r of got.rows ?? [])
+        console.log(`   ${r.hull} d=${r.d} len=${r.len} wid=${r.wid} tip ${r.lo}/${r.hi} → ${r.bow ?? '판정보류'}`);
       if (!best || got.bows.size > best.bows.size) { best = got; bestMask = { mask, ...m }; }
     }
     // ★못 읽었으면 왜인지 재서 남긴다. 두 번 추측해서 두 번 틀렸다(겹 문제인 줄 알았는데

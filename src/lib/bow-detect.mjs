@@ -264,11 +264,18 @@ export function bowByHull(mask, W, H, expected) {
   if (!reg) return { bows, matched: 0, found: shapes.length };
   // 도형각(이미지) → 야드각: 변환의 회전분만큼 돌린다.
   const rot = deg(Math.atan2(reg.T.b, reg.T.a));
-  for (const { hull, shape } of reg.pairs) {
+  const rows = [];
+  for (const { hull, shape, dist } of reg.pairs) {
+    rows.push({ hull, d: +dist.toFixed(1), len: +shape.len.toFixed(0), wid: +shape.wid.toFixed(1),
+                lo: +shape.tipLo.toFixed(2), hi: +shape.tipHi.toFixed(2), bow: shape.bowAt });
     if (shape.bowDeg === null) continue;                 // 블록 — 판정하지 않는다
     bows.set(hull, norm360(shape.bowDeg + rot));
   }
-  return { bows, matched: reg.pairs.length, found: shapes.length };
+  // ★붙은 배마다 실제 수치를 같이 낸다. "왜 방향이 안 나오나" 를 로그만 보고 가르기 위한 것 —
+  //  숫자(길이·폭·끝단비)뿐이라 공개 로그에 나가도 그림 내용이 아니다.
+  const unmatched = shapes.length - reg.pairs.length;
+  return { bows, matched: reg.pairs.length, found: shapes.length, rows, unmatched,
+           scale: +Math.hypot(reg.T.a, reg.T.b).toFixed(3) };
 }
 
 /**
