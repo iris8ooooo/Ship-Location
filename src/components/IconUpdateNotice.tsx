@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Check, Copy, ExternalLink, X } from 'lucide-react';
+import { appName } from '../lib/app-name';
 
 /**
  * 아이콘이 바뀌었을 때 **설치본 사용자에게 한 번만** 알린다.
@@ -52,6 +53,8 @@ export function IconUpdateNotice() {
   const [show, setShow] = useState(false);
   const [ver, setVer] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [nameCopied, setNameCopied] = useState(false);
+  const name = appName();
 
   // ★`location.href` 가 아니라 origin + '/' 를 준다. 지금 주소에 `?admin=true` 가
   //  붙어 있을 수 있는데, 그대로 복사하면 관리자 권한이 딸려 나간다.
@@ -97,6 +100,10 @@ export function IconUpdateNotice() {
   /** ★X 는 기록하지 않는다 — 실수로 닫았을 때 영영 못 보게 되면 안 된다. */
   const later = () => setShow(false);
 
+  const copyName = async () => {
+    try { await navigator.clipboard.writeText(name); setNameCopied(true); } catch { setNameCopied(false); }
+  };
+
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(url);
@@ -109,7 +116,7 @@ export function IconUpdateNotice() {
 
   const steps = isIOS()
     ? ['아래 「Safari에서 열기」를 누른다 (안 되면 「주소 복사」 후 Safari 주소창에 붙여넣기)',
-       'Safari 에서 공유 → 「홈 화면에 추가」',
+       'Safari 에서 공유 → 「홈 화면에 추가」 (이름 칸에 옛 이름이 뜨면 아래 이름으로 고치세요)',
        '새 아이콘이 생기면 옛 아이콘을 길게 눌러 삭제']
     : ['아래 「주소 복사」 후 크롬 주소창에 붙여넣기',
        '주소창 오른쪽 설치 아이콘으로 다시 설치',
@@ -163,6 +170,22 @@ export function IconUpdateNotice() {
 
       {/* 복사가 막혀도 손으로 집을 수 있게 주소를 그대로 보여 준다. */}
       <p className="m-0 mt-2 select-all break-all text-[11px] leading-tight text-gray-500">{url}</p>
+      {isIOS() && (
+        // ★아이폰이 「홈 화면에 추가」 이름 칸에 **예전에 기억해 둔 이름**을 채워 넣는다.
+        //  서버를 아무리 고쳐도 그 칸은 안 바뀐다 — 그래서 붙여넣을 수 있게 쥐여 준다.
+        <div className="mt-2 flex items-center gap-2">
+          <span className="min-w-0 flex-1 select-all truncate text-[11px] text-gray-600">{name}</span>
+          <button
+            onClick={copyName}
+            className={`shrink-0 rounded-md border px-2 py-1 text-[11px] font-bold ${
+              nameCopied ? 'border-emerald-600 text-emerald-700' : 'border-gray-300 text-gray-600 active:bg-gray-100'
+            }`}
+          >
+            {nameCopied ? '복사됨' : '이름 복사'}
+          </button>
+        </div>
+      )}
+
 
       <button
         onClick={done}
