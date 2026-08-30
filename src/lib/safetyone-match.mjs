@@ -226,7 +226,7 @@ export function planMoves(rows, live) {
       const axisSame = c.axisR == null || curR % 180 === c.axisR % 180;
       moves.push({ hull: c.hull, loc: c.loc, berth: c.berth,
                    to: { x: c.cur.x, y: c.cur.y, r: want },
-                   from: { x: c.cur.x, y: c.cur.y }, reason: axisSame ? '뱃머리' : '축' });
+                   from: { x: c.cur.x, y: c.cur.y, r: curR }, reason: axisSame ? '뱃머리' : '축' });
       continue;
     }
     let berth = c.berth;
