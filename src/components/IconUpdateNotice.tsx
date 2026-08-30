@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { X } from 'lucide-react';
+import { Check, Copy, ExternalLink, X } from 'lucide-react';
 
 /**
  * 아이콘이 바뀌었을 때 **설치본 사용자에게 한 번만** 알린다.
@@ -11,6 +11,19 @@ import { X } from 'lucide-react';
  *    - PC 크롬 설치본      → `icons` 가 보안 민감 필드라 사용자가 승인해야 반영
  *    - **아이폰 홈화면**   → 갱신 경로가 **아예 없다.** 지우고 다시 추가하는 수밖에 없다
  *  마지막 하나 때문에 앱이 직접 말해 주는 것 말고는 방법이 없다.
+ *
+ * ★2026-08-30 사용자 지적으로 다시 만들었다 — 첫 판은 구조가 틀렸다.
+ *  이 카드는 **설치본 안**에서 뜬다. 거기엔 주소창도 공유 버튼도 없다. 그런데 첫 판은
+ *  "Safari 로 다시 열어 공유 → 홈 화면에 추가" 라고만 적어 놓았다 — **주소를 꺼낼
+ *  방법을 주지 않고 주소가 필요한 일을 시킨 것이다.** 그래서 실제로 따라 할 수 없었다.
+ *  게다가 「북마크 제거」 같은 메뉴 이름은 iOS 버전마다 달라 단정하면 안 된다.
+ *  → 이제 **주소를 직접 건네준다**(Safari 로 열기 · 주소 복사 · 눈에 보이는 주소).
+ *
+ * ★"아이콘을 꾹 눌러 바탕화면으로 끌어다 놓으면 바로 추가" 는 **아이폰에서 불가능하다.**
+ *  홈 화면은 URL 을 받는 드롭 대상이 아니다. 웹클립을 만드는 경로는 공유 →
+ *  「홈 화면에 추가」, 또는 단축어 앱의 "Make App from Web URL" 둘뿐이다(후자는 오히려
+ *  단계가 늘어난다). 데스크톱은 링크를 바탕화면으로 끌 수 있지만 그건 **북마크
+ *  바로가기**라 manifest 를 안 읽어 제목·아이콘이 그 순간 값으로 굳는다 — 더 나쁘다.
  *
  * ★버전은 따로 관리하지 않는다.
  *  `apple-touch-icon` 의 href 에 이미 그림 해시가 박혀 있다(`icon-180.<hash>.png`).
@@ -38,6 +51,11 @@ const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent);
 export function IconUpdateNotice() {
   const [show, setShow] = useState(false);
   const [ver, setVer] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  // ★`location.href` 가 아니라 origin + '/' 를 준다. 지금 주소에 `?admin=true` 가
+  //  붙어 있을 수 있는데, 그대로 복사하면 관리자 권한이 딸려 나간다.
+  const url = `${window.location.origin}/`;
 
   useEffect(() => {
     const v = currentIconVersion();
@@ -71,10 +89,31 @@ export function IconUpdateNotice() {
 
   if (!show) return null;
 
+  /** 다시 안 뜨게 기록하고 닫는다. */
   const done = () => {
     try { if (ver) localStorage.setItem(KEY, ver); } catch { /* 비공개 모드 */ }
     setShow(false);
   };
+  /** ★X 는 기록하지 않는다 — 실수로 닫았을 때 영영 못 보게 되면 안 된다. */
+  const later = () => setShow(false);
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+    } catch {
+      // 클립보드가 막히면(비보안 컨텍스트·권한 거부) 아래 주소를 직접 길게 눌러 복사한다.
+      setCopied(false);
+    }
+  };
+
+  const steps = isIOS()
+    ? ['아래 「Safari에서 열기」를 누른다 (안 되면 「주소 복사」 후 Safari 주소창에 붙여넣기)',
+       'Safari 에서 공유 → 「홈 화면에 추가」',
+       '새 아이콘이 생기면 옛 아이콘을 길게 눌러 삭제']
+    : ['아래 「주소 복사」 후 크롬 주소창에 붙여넣기',
+       '주소창 오른쪽 설치 아이콘으로 다시 설치',
+       '옛 바로가기를 삭제'];
 
   return (
     <div className="fixed inset-x-3 top-20 z-[60] mx-auto max-w-sm rounded-2xl bg-white/95 backdrop-blur px-4 py-3 shadow-xl">
@@ -83,23 +122,53 @@ export function IconUpdateNotice() {
           <h4 className="m-0 text-sm font-bold text-gray-800">앱 아이콘이 새로 바뀌었습니다</h4>
           <p className="m-0 mt-1 text-xs leading-snug text-gray-600">
             {isIOS()
-              ? '아이폰은 홈 화면 아이콘을 자동으로 갱신하지 못합니다. 이 아이콘을 길게 눌러 「북마크 제거」한 뒤, Safari 로 다시 열어 공유 → 「홈 화면에 추가」 하시면 새 아이콘이 나옵니다.'
-              : '바탕화면 바로가기는 만든 날 아이콘이 굳습니다. 옛 바로가기를 지우고 다시 설치하시면 새 아이콘이 나옵니다.'}
+              ? '아이폰은 홈 화면 아이콘을 자동으로 바꾸지 못합니다. 새 아이콘으로 바꾸시려면:'
+              : '바탕화면 바로가기는 만든 날 아이콘이 굳습니다. 새 아이콘으로 바꾸시려면:'}
           </p>
+          <ol className="m-0 mt-1 list-decimal pl-4 text-xs leading-snug text-gray-600">
+            {steps.map((s) => <li key={s} className="mt-0.5">{s}</li>)}
+          </ol>
         </div>
         <button
-          onClick={done}
+          onClick={later}
           aria-label="닫기"
           className="-mr-1 -mt-1 shrink-0 rounded-lg p-1.5 text-gray-400 active:bg-gray-100"
         >
           <X size={18} />
         </button>
       </div>
+
+      <div className="mt-2 flex gap-2">
+        {isIOS() && (
+          // 설치본에서 target=_blank 는 Safari 로 나간다. 확실치 않은 기기가 있어
+          // 「주소 복사」를 나란히 둔다 — 둘 중 하나는 반드시 통한다.
+          <a
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex flex-1 items-center justify-center gap-1 rounded-lg bg-blue-600 px-3 py-2 text-sm font-bold text-white active:bg-blue-700"
+          >
+            <ExternalLink size={15} /> Safari에서 열기
+          </a>
+        )}
+        <button
+          onClick={copy}
+          className={`flex flex-1 items-center justify-center gap-1 rounded-lg px-3 py-2 text-sm font-bold ${
+            copied ? 'bg-emerald-600 text-white' : 'bg-gray-800 text-white active:bg-gray-700'
+          }`}
+        >
+          {copied ? <><Check size={15} /> 복사됨</> : <><Copy size={15} /> 주소 복사</>}
+        </button>
+      </div>
+
+      {/* 복사가 막혀도 손으로 집을 수 있게 주소를 그대로 보여 준다. */}
+      <p className="m-0 mt-2 select-all break-all text-[11px] leading-tight text-gray-500">{url}</p>
+
       <button
         onClick={done}
-        className="mt-2 w-full rounded-lg bg-gray-800 px-3 py-2 text-sm font-bold text-white active:bg-gray-700"
+        className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-bold text-gray-600 active:bg-gray-100"
       >
-        알겠습니다
+        다 했습니다 · 다시 보지 않기
       </button>
     </div>
   );
