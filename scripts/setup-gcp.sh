@@ -85,6 +85,12 @@ else
   ok "생성: $SA"
 fi
 
+# ★roles/firebaserules.admin 은 deploy-firestore-rules.yml 이 쓴다. 없으면 룰 배포가
+#  컴파일 검사(:test) 단계에서 403 으로 죽는다 — 실제로 그렇게 죽어 있었고, 그래서
+#  meta/safetyone 심장박동이 막혀 앱의 "3중점검 N분 전" 칩이 안 떴다 (2026-08-30).
+# ★roles/firebaserules.admin 은 deploy-firestore-rules.yml 이 쓴다. 없으면 룰 배포가
+#  컴파일 검사(:test) 단계에서 403 으로 죽는다 — 실제로 그렇게 죽어 있었고, 그래서
+#  meta/safetyone 심장박동이 막혀 앱의 "3중점검 N분 전" 칩이 안 떴다 (2026-08-30).
 say "3. 권한 부여"
 for ROLE in \
   roles/run.admin \
@@ -92,7 +98,9 @@ for ROLE in \
   roles/artifactregistry.admin \
   roles/storage.admin \
   roles/logging.viewer \
-  roles/iam.serviceAccountUser
+  roles/iam.serviceAccountUser \
+  roles/firebaserules.admin \
+  roles/firebaserules.admin
 do
   gcloud projects add-iam-policy-binding "$PROJECT_ID" \
     --member="serviceAccount:${SA}" --role="$ROLE" \
