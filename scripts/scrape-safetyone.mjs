@@ -492,7 +492,37 @@ if (rows.length < 5) {
 // 야드엔 보통 20척 이상 있다. 몇 척 안 잡혔으면 리스트가 안 펼쳐진 것이다.
 if (rows.length < 5) await bail(`행을 ${rows.length}개밖에 못 읽었다 — 리스트가 안 펼쳐졌거나 화면 구조가 바뀌었다`);
 
-writeFileSync(outPath, JSON.stringify({ capturedAt: new Date().toISOString(), kind, rows }, null, 1));
+// ③ 지도 캔버스에서 **뱃머리**를 읽는다.
+//  배 레이어의 angle 은 0/±90 두 값뿐이라 축밖에 말하지 않지만, 그림은 선수를
+//  둥글게 · 선미를 네모나게 그린다(사용자 지시, 원본 도면으로 검증).
+//  ★공개 레포다. 그림 자체는 절대 파일로 남기지 않는다 — 흰 픽셀 여부만 뽑아
+//   1비트 마스크로 넘긴다. 사내 화면 내용이 로그·아티팩트로 새지 않게 하려는 것이다.
+let canvasMask = null;
+try {
+  canvasMask = await page.evaluate(() => {
+    const cs = [...document.querySelectorAll('canvas')]
+      .filter(c => c.width > 400 && c.height > 400)
+      .sort((a, b) => b.width * b.height - a.width * a.height);
+    if (!cs.length) return null;
+    const c = cs[0];
+    const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+    const n = c.width * c.height;
+    const bits = new Uint8Array((n + 7) >> 3);
+    for (let i = 0, k = 0; i < n; i++, k += 4)
+      if (d[k] > 246 && d[k + 1] > 246 && d[k + 2] > 246) bits[i >> 3] |= 1 << (i & 7);
+    let bin = '';
+    for (let i = 0; i < bits.length; i += 8192)
+      bin += String.fromCharCode(...bits.subarray(i, i + 8192));
+    return { w: c.width, h: c.height, bits: btoa(bin) };
+  });
+  if (canvasMask) console.log(`지도 캔버스 마스크 확보 — ${canvasMask.w}x${canvasMask.h}`);
+  else console.log('지도 캔버스를 못 찾았다 — 뱃머리는 선석 관례로 간다.');
+} catch (e) {
+  // 캔버스가 오염(cross-origin)됐거나 구조가 바뀐 경우. 위치 수집은 그대로 진행한다.
+  console.log(`지도 캔버스를 못 읽었다(${e.message}) — 뱃머리는 선석 관례로 간다.`);
+}
+
+writeFileSync(outPath, JSON.stringify({ capturedAt: new Date().toISOString(), kind, rows, canvasMask }, null, 1));
 console.log(`호선 ${rows.length}척 수집 (${source}, ${kind}) → ${outPath}`);
 // ★성공해도 진단을 남긴다. 실패할 때만 보이면 "그럴듯하게 틀린" 수집을 못 잡는다.
 //  실제로 그렇게 두 번 놓쳤다(전부 1안벽 / 작업내용 필드).

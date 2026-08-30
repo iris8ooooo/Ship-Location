@@ -18,7 +18,8 @@ import { readFileSync } from 'node:fs';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, connectFirestoreEmulator, collection, getDocs, doc, setDoc, updateDoc, addDoc } from 'firebase/firestore';
 import { parseListText, planMoves, BERTH_LABEL } from '../src/lib/safetyone-match.mjs';
-import { residualMedian, namedRowsFromCoords, MAX_RESIDUAL } from '../src/lib/yard-transform.mjs';
+import { residualMedian, namedRowsFromCoords, MAX_RESIDUAL, tmToYard } from '../src/lib/yard-transform.mjs';
+import { bowByHull, unpackMask } from '../src/lib/bow-detect.mjs';
 
 const args = process.argv.slice(2);
 const dry = args.includes('--dry');
@@ -36,7 +37,9 @@ try {
   capture = Array.isArray(j) ? null : j;
   rows = (Array.isArray(j) ? j : j.rows).map(r =>
     r.tmx != null || r.tmy != null
-      ? { hull: String(r.hull), tmx: Number(r.tmx), tmy: Number(r.tmy) }
+      // ★angle 을 같이 실어야 한다. 여기서 떨어뜨리면 축 판정(axisFromAngle)이
+      //  값을 못 받아 **조용히 아무 일도 안 한다** — 실제로 그렇게 한 번 no-op 였다.
+      ? { hull: String(r.hull), tmx: Number(r.tmx), tmy: Number(r.tmy), angle: Number(r.angle) }
       : { hull: String(r.hull), loc: String(r.loc ?? r.위치 ?? '') });
 } catch {
   ({ rows, unknownLines } = parseListText(raw));
@@ -73,6 +76,25 @@ if (capture?.kind === 'coords') {
     process.exit(1);
   }
   const named = namedRowsFromCoords(rows, live);
+
+  // ★뱃머리는 **그림**에서 읽는다 (2026-08-30). 배 레이어의 angle 은 축밖에 말하지 않지만
+  //  지도는 선수를 둥글게 · 선미를 네모나게 그린다. 캔버스를 못 받았거나 못 읽으면
+  //  조용히 넘어간다 — 위치 수집이 뱃머리 때문에 멈출 이유는 없다.
+  if (capture?.canvasMask) {
+    const { w, h, bits } = capture.canvasMask;
+    const expected = rows
+      .map(r => ({ hull: r.hull, ...(tmToYard(r.tmx, r.tmy) || {}) }))
+      .filter(e => Number.isFinite(e.x));
+    const { bows, matched, found } = bowByHull(unpackMask(bits, w * h), w, h, expected);
+    for (const r of named.rows) {
+      const b = bows.get(r.hull);
+      if (b !== undefined) r.bowDeg = b;
+    }
+    console.log(`뱃머리 — 도형 ${found} · 호선에 붙임 ${matched} · 방향 읽음 ${bows.size}`
+      + (bows.size ? '' : ' (전부 관례로)'));
+  } else {
+    console.log('뱃머리 — 지도 캔버스가 없다. 선석 관례로 간다.');
+  }
   rows = named.rows;
   if (named.off.length) console.log(`⚠ 아는 선석 근처가 아니다(손 안 댐): ${named.off.join(' ')}`);
   if (named.held.length) console.log(`선석 경계라 지금 선석을 유지: ${named.held.join(' ')}`);

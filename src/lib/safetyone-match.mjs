@@ -1,3 +1,4 @@
+import { headingFromBow } from './bow-detect.mjs';
 /**
  * 세이프티원 3중점검 리스트 → 십로케이션 좌표 매칭 엔진.
  *
@@ -164,8 +165,12 @@ export function berthOfPos(pos) {
  * @param axisR   있어야 할 축 — 0(세로) 또는 90(가로). 모르면 fallbackR 의 축을 쓴다.
  * @param fallbackR 축이 바뀌어 앞뒤를 유추할 수 없을 때 쓸 값(그 선석의 관례)
  */
-export function shipHeading(curR, axisR, fallbackR) {
+export function shipHeading(curR, axisR, fallbackR, bowDeg) {
   const axis = (((axisR ?? fallbackR) % 180) + 180) % 180;
+  // ★그림에서 뱃머리를 읽었으면 그게 이긴다 (2026-08-30). 사람 손보다 세다 —
+  //  애초에 사람이 정하던 건 "세이프티원이 말해 주지 않아서" 였고, 이제 말해 준다.
+  //  블록(양끝 네모)은 bowDeg 가 안 오므로 아래의 사람 우선 규칙이 그대로 산다.
+  if (Number.isFinite(bowDeg)) return headingFromBow(bowDeg, axis);
   if (!Number.isFinite(curR)) return fallbackR;
   const cur = ((curR % 360) + 360) % 360;
   // 이미 맞는 축이면 그대로 둔다 — 사람이 고른 앞뒤를 지키는 것이 여기 전부다.
@@ -214,11 +219,14 @@ export function planMoves(rows, live) {
       //  다음 수집부터 계속 "그대로" 로 읽히기 때문이다. 이 프로젝트가 반복해서 당한 모양이다.
       //  세이프티원이 축을 말해 줄 때(c.axisR)만 손댄다. 값이 없으면 추측하지 않는다.
       const curR = (((c.cur.r ?? 0) % 360) + 360) % 360;
-      const want = c.axisR == null ? curR : shipHeading(curR, c.axisR, BERTH_SLOTS[c.berth][0].r);
+      const want = (c.axisR == null && c.bowDeg == null)
+        ? curR
+        : shipHeading(curR, c.axisR, BERTH_SLOTS[c.berth][0].r, c.bowDeg);
       if (want === curR) { skips.push(c); continue; }
+      const axisSame = c.axisR == null || curR % 180 === c.axisR % 180;
       moves.push({ hull: c.hull, loc: c.loc, berth: c.berth,
                    to: { x: c.cur.x, y: c.cur.y, r: want },
-                   from: { x: c.cur.x, y: c.cur.y }, reason: '축' });
+                   from: { x: c.cur.x, y: c.cur.y }, reason: axisSame ? '뱃머리' : '축' });
       continue;
     }
     let berth = c.berth;
@@ -227,7 +235,7 @@ export function planMoves(rows, live) {
       // 실제 자리를 안다 — 슬롯을 고를 필요가 없다. 회전은 축만 세이프티원(c.axisR)이
       // 정하고 앞뒤는 지금 값을 지킨다(shipHeading).
       const want = { x: Math.round(c.at.x), y: Math.round(c.at.y),
-                     r: shipHeading(c.cur?.r, c.axisR, BERTH_SLOTS[berth][0].r) };
+                     r: shipHeading(c.cur?.r, c.axisR, BERTH_SLOTS[berth][0].r, c.bowDeg) };
       // ★단, 그 자리에 이미 배가 있으면 놓지 않는다 (2026-08-29 실제로 겹쳤다).
       //  8265 를 실좌표 (83,575) 에 놓았더니 8206(75,560) 과 8px·15px 차이라
       //  마커 폭 26px 안에서 완전히 포개졌다. 세이프티원 좌표로도 둘은 21px 차이 —
@@ -245,7 +253,7 @@ export function planMoves(rows, live) {
     }
     if (!slot) { unknown.push({ ...c, loc: `${c.loc} (자리 없음)` }); continue; }
     // 슬롯으로 물러날 때도 앞뒤는 지킨다 — 자리를 양보한 것이지 뱃머리를 돌린 게 아니다.
-    slot = { ...slot, r: shipHeading(c.cur?.r, c.axisR, slot.r) };
+    slot = { ...slot, r: shipHeading(c.cur?.r, c.axisR, slot.r, c.bowDeg) };
     const item = { hull: c.hull, loc: c.loc, berth, to: slot, from: c.cur ? { x: c.cur.x, y: c.cur.y } : null };
     (c.kind === 'move' ? moves : creates).push(item);
   }
