@@ -4,6 +4,13 @@ name: PWA check
 # 이 레포를 만지는 세션은 샌드박스라 run.app 에 직접 못 닿는다 — 여기가 유일한 눈이다.
 #
 # 읽기만 한다. 앱은 공개 URL 이라 새로 새는 정보가 없다.
+#
+# ★아이콘 파일명을 박아 두지 않는다. 이름에 그림 해시가 붙어 있어(make-icons.mjs)
+#  그림을 바꾸면 이름이 바뀐다. 박아 두면 액션이 항상 옛 이름을 찾아 404 를 낸다.
+#  프로덕션 index.html·manifest.json 이 **실제로 가리키는** 경로만 확인한다.
+#
+# ★찍기만 하고 끝내지 않는다. 문제가 있으면 실패시킨다 — 아무 일도 안 하고 초록불이면
+#  "확인했다" 로 읽히는데 그게 이 레포가 여러 번 당한 조용한 오답이다.
 
 on:
   workflow_dispatch:
@@ -18,6 +25,7 @@ jobs:
       - name: 프로덕션이 내보내는 설치 정보
         run: |
           set -o pipefail
+          : > /tmp/fail
           {
             echo "## 프로덕션 설치 정보 (`date -u +%FT%TZ`)"
             echo
@@ -38,18 +46,64 @@ jobs:
             echo
             echo '### manifest.json'
             echo '```'
-            curl -sS -D /tmp/mh "$URL/manifest.json" | head -40
+            curl -sS -D /tmp/mh -o /tmp/manifest.json "$URL/manifest.json"
+            head -40 /tmp/manifest.json
             echo '--- 헤더 ---'
             grep -iE '^(HTTP|cache-control|content-type)' /tmp/mh || true
             echo '```'
             echo
-            echo '### 아이콘 파일 (있는 것만)'
+            echo '### 아이콘 파일 — 페이지가 실제로 가리키는 것만'
             echo '```'
-            for f in /icon.svg /icon-180.png /icon-192.png /icon-512.png /icon-maskable-512.png /favicon.ico; do
+            # index.html 의 href 와 manifest 의 src 에서 이미지 경로를 그대로 뽑는다.
+            {
+              grep -oiE 'href="/[^"]+\.(png|svg|ico)"' /tmp/index.html | sed -E 's/.*href="([^"]+)".*/\1/' || true
+              grep -oE '"src"[[:space:]]*:[[:space:]]*"[^"]+"' /tmp/manifest.json | sed -E 's/.*"([^"]+)"$/\1/' || true
+            } | sort -u > /tmp/icons
+            [ -s /tmp/icons ] || echo '참조된 아이콘이 하나도 없다' >> /tmp/fail
+            while read -r f; do
+              [ -n "$f" ] || continue
               code=$(curl -sS -o /tmp/ic -w '%{http_code}' "$URL$f")
               size=$(wc -c < /tmp/ic)
-              ctype=$(curl -sS -o /dev/null -D - "$URL$f" | grep -i '^content-type' | tr -d '\r' || true)
+              ctype=$(curl -sS -o /dev/null -D - "$URL$f" | grep -i '^content-type' | tr -d '\r' | cut -d' ' -f2 || true)
               echo "$f  → $code  ${size}B  ${ctype:-(content-type 없음)}"
-            done
+              case "$code:$ctype" in
+                200:image/*) ;;
+                *) echo "$f 가 $code / ${ctype:-없음} 로 나온다 (200 + image/* 여야 한다)" >> /tmp/fail ;;
+              esac
+            done < /tmp/icons
+            echo '```'
+            echo
+            echo '### 검사'
+            echo '```'
+            # 1) iOS 는 apple-touch-icon 에 SVG 를 못 쓴다 — 반드시 PNG.
+            atouch=$(grep -oiE '<link[^>]*apple-touch-icon[^>]*>' /tmp/index.html | grep -oE 'href="[^"]+"' | sed -E 's/href="([^"]+)"/\1/' || true)
+            case "$atouch" in
+              *.png) echo "ok    apple-touch-icon 이 PNG ($atouch)" ;;
+              '')    echo "FAIL  apple-touch-icon 이 없다"; echo 'apple-touch-icon 없음' >> /tmp/fail ;;
+              *)     echo "FAIL  apple-touch-icon 이 PNG 가 아니다 ($atouch) — iOS 는 못 읽고 페이지 스크린샷을 박는다"
+                     echo "apple-touch-icon 이 PNG 가 아님: $atouch" >> /tmp/fail ;;
+            esac
+            # 2) 없는 정적 파일은 404 여야 한다. 200+text/html 로 나오면 파일명 오타가
+            #    조용히 묻힌다(2026-08-30 실제로 그랬다).
+            miss=$(curl -sS -o /dev/null -w '%{http_code}' "$URL/icon-no-such-file-99.png")
+            if [ "$miss" = "404" ]; then echo "ok    없는 png 는 404"
+            else echo "FAIL  없는 png 가 $miss — SPA 폴백이 정적 파일까지 삼키고 있다"
+                 echo "없는 png 가 $miss" >> /tmp/fail; fi
+            # 3) 홈화면 이름 네 곳이 같아야 한다. 하나만 어긋나면 플랫폼마다 다른
+            #    이름이 뜨고 어디를 고칠지 못 찾는다.
+            t=$(grep -oiE '<title>[^<]*</title>' /tmp/index.html | sed -E 's_</?title>__g' || true)
+            a=$(grep -oiE '<meta[^>]*apple-mobile-web-app-title[^>]*>' /tmp/index.html | grep -oE 'content="[^"]*"' | sed -E 's/content="([^"]*)"/\1/' || true)
+            n=$(grep -oE '"name"[[:space:]]*:[[:space:]]*"[^"]*"' /tmp/manifest.json | head -1 | sed -E 's/.*"([^"]*)"$/\1/' || true)
+            s=$(grep -oE '"short_name"[[:space:]]*:[[:space:]]*"[^"]*"' /tmp/manifest.json | head -1 | sed -E 's/.*"([^"]*)"$/\1/' || true)
+            echo "      title=[$t] apple=[$a] name=[$n] short_name=[$s]"
+            if [ "$t" = "$a" ] && [ "$a" = "$n" ] && [ "$n" = "$s" ]; then echo "ok    이름 네 곳이 같다"
+            else echo "FAIL  이름이 서로 다르다 — 플랫폼마다 다른 이름이 뜬다"
+                 echo '이름 네 곳이 다르다' >> /tmp/fail; fi
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
+
+          if [ -s /tmp/fail ]; then
+            { echo; echo '### ❌ 문제'; echo '```'; cat /tmp/fail; echo '```'; } | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          { echo; echo '### ✅ 전부 통과'; } | tee -a "$GITHUB_STEP_SUMMARY"
