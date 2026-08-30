@@ -497,47 +497,74 @@ if (rows.length < 5) await bail(`행을 ${rows.length}개밖에 못 읽었다 �
 //  둥글게 · 선미를 네모나게 그린다(사용자 지시, 원본 도면으로 검증).
 //  ★공개 레포다. 그림 자체는 절대 파일로 남기지 않는다 — 흰 픽셀 여부만 뽑아
 //   1비트 마스크로 넘긴다. 사내 화면 내용이 로그·아티팩트로 새지 않게 하려는 것이다.
+// ③ 지도 캔버스에서 **뱃머리**를 읽는다.
+//  ★확대해서 뜬다 (2026-08-30, 사용자 확인: "확대하면 배가 커진다").
+//   기본 배율에서는 호선번호 글자가 지도 배율과 무관하게 고정 크기로 그려져 선체를
+//   가로질러 **흰 도형을 두 동강** 낸다(실측 run 27: 길이 49~94, 폭은 정상).
+//   조각의 잘린 단면은 "뭉툭한 끝" 으로 읽혀 반대 방향이 나올 수 있다. 확대하면
+//   선체가 글자보다 훨씬 커져 그 문제가 통째로 사라진다.
+//  ★공개 레포다. 그림은 절대 파일로 남기지 않는다 — "흰가 아닌가" 1비트 마스크만 넘긴다.
+const grabMask = () => page.evaluate(() => {
+  const c = [...document.querySelectorAll('canvas')]
+    .filter(v => v.width >= 400 && v.height >= 400)
+    .sort((a, b) => b.width * b.height - a.width * a.height)[0];
+  if (!c) return null;
+  let d;
+  try { d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; }
+  catch { return { w: c.width, h: c.height, err: 'getImageData 거부(오염된 캔버스)' }; }
+  const n = c.width * c.height;
+  const bits = new Uint8Array((n + 7) >> 3);
+  let white = 0;
+  for (let i = 0, k = 0; i < n; i++, k += 4)
+    if (Math.min(d[k], d[k + 1], d[k + 2]) > 246) { bits[i >> 3] |= 1 << (i & 7); white++; }
+  const frac = white / n;
+  if (frac < 0.0005 || frac > 0.5) return { w: c.width, h: c.height, frac, skip: true };
+  let bin = '';
+  for (let i = 0; i < bits.length; i += 8192) bin += String.fromCharCode(...bits.subarray(i, i + 8192));
+  return { w: c.width, h: c.height, frac, bits: btoa(bin) };
+});
+
 let canvasMasks = [];
 try {
-  canvasMasks = await page.evaluate(() => {
-    // ★캔버스가 여러 겹일 수 있다 — GIS 화면은 대개 바탕지도 캔버스와 오버레이가 따로다.
-    //  가장 큰 것 하나만 집었더니 배가 2개밖에 안 잡혔다(run 23). 후보를 다 넘기고
-    //  어느 것이 배 레이어인지는 Node 가 실제로 세어 보고 고른다 — 여기서 추측하지 않는다.
-    const out = [];
-    const cs = [...document.querySelectorAll('canvas')]
-      .filter(c => c.width >= 400 && c.height >= 400)
-      .sort((a, b) => b.width * b.height - a.width * a.height)
-      .slice(0, 3);
-    for (const c of cs) {
-      let d;
-      try { d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; }
-      catch { out.push({ w: c.width, h: c.height, err: 'getImageData 거부(오염된 캔버스)' }); continue; }
-      const n = c.width * c.height;
-      const bits = new Uint8Array((n + 7) >> 3);
-      let white = 0;
-      // ★배가 순백이 아닐 수도 있다. 문턱을 여러 개 같이 세어 두면 다음 실행 로그만 보고
-      //  "안 잡힌 게 문턱 탓인가" 를 바로 가른다 — 또 추측하지 않으려는 것이다.
-      const lv = [246, 235, 220, 200], cnt = [0, 0, 0, 0];
-      for (let i = 0, k = 0; i < n; i++, k += 4) {
-        const m = Math.min(d[k], d[k + 1], d[k + 2]);
-        for (let t = 0; t < lv.length; t++) if (m > lv[t]) cnt[t]++;
-        if (m > 246) { bits[i >> 3] |= 1 << (i & 7); white++; }
-      }
-      const levels = Object.fromEntries(lv.map((t, i) => [t, +(cnt[i] / n * 100).toFixed(2)]));
-      // 온통 희거나 거의 안 흰 겹은 배 레이어가 아니다. 마스크를 실어 보낼 것도 없다.
-      const frac = white / n;
-      if (frac < 0.0005 || frac > 0.5) { out.push({ w: c.width, h: c.height, frac, levels, skip: true }); continue; }
-      let bin = '';
-      for (let i = 0; i < bits.length; i += 8192) bin += String.fromCharCode(...bits.subarray(i, i + 8192));
-      out.push({ w: c.width, h: c.height, frac, levels, bits: btoa(bin) });
-    }
-    return out;
+  const box = await page.evaluate(() => {
+    const c = [...document.querySelectorAll('canvas')]
+      .filter(v => v.width >= 400 && v.height >= 400)
+      .sort((a, b) => b.width * b.height - a.width * a.height)[0];
+    if (!c) return null;
+    const r = c.getBoundingClientRect();
+    return { x: r.x, y: r.y, w: r.width, h: r.height };
   });
+  if (!box) {
+    console.log('400px 이상 캔버스가 없다 — 뱃머리는 선석 관례로 간다.');
+  } else {
+    // 먼저 지금 화면 그대로 한 장. 확대가 안 먹어도 최소한 이건 남는다.
+    const base = await grabMask();
+    if (base) canvasMasks.push({ ...base, zoom: 0, at: 'base' });
+
+    // 그다음 네 구역을 각각 확대해서 한 장씩. 휠 확대는 마우스 자리를 중심으로 하므로
+    // 끌어서 이동할 필요가 없다 — 볼 곳에 마우스를 두고 확대했다가 되돌리면 된다.
+    const NOTCH = 3;
+    const spots = [[0.3, 0.32], [0.7, 0.32], [0.3, 0.68], [0.7, 0.68]];
+    for (const [fx, fy] of spots) {
+      const mx = box.x + box.w * fx, my = box.y + box.h * fy;
+      try {
+        await page.mouse.move(mx, my);
+        for (let i = 0; i < NOTCH; i++) { await page.mouse.wheel(0, -400); await page.waitForTimeout(220); }
+        await page.waitForTimeout(1600);                      // 타일이 다시 그려질 시간
+        const m = await grabMask();
+        if (m) canvasMasks.push({ ...m, zoom: NOTCH, at: `${fx},${fy}` });
+      } catch (e) {
+        console.log(`확대 캡처 실패(${fx},${fy}): ${e.message}`);
+      } finally {
+        // 반드시 원래 배율로 되돌린다 — 다음 구역이 이전 확대 위에 겹치면 안 된다.
+        for (let i = 0; i < NOTCH; i++) { await page.mouse.wheel(0, 400); await page.waitForTimeout(220); }
+        await page.waitForTimeout(900);
+      }
+    }
+  }
   for (const m of canvasMasks)
-    console.log(`지도 캔버스 후보 — ${m.w}x${m.h}` +
-      (m.err ? ` · ${m.err}` : ` · 흰비율 ${(m.frac * 100).toFixed(2)}%${m.skip ? ' (건너뜀)' : ''}`
-        + (m.levels ? ` · 문턱별 ${JSON.stringify(m.levels)}` : '')));
-  if (!canvasMasks.length) console.log('400px 이상 캔버스가 없다 — 뱃머리는 선석 관례로 간다.');
+    console.log(`지도 캔버스 [${m.at} z${m.zoom}] — ${m.w}x${m.h}` +
+      (m.err ? ` · ${m.err}` : ` · 흰비율 ${(m.frac * 100).toFixed(2)}%${m.skip ? ' (건너뜀)' : ''}`));
 } catch (e) {
   // 위치 수집은 뱃머리 때문에 멈추지 않는다.
   console.log(`지도 캔버스를 못 읽었다(${e.message}) — 뱃머리는 선석 관례로 간다.`);

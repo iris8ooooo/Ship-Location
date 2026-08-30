@@ -39,7 +39,7 @@ try {
     r.tmx != null || r.tmy != null
       // ★angle 을 같이 실어야 한다. 여기서 떨어뜨리면 축 판정(axisFromAngle)이
       //  값을 못 받아 **조용히 아무 일도 안 한다** — 실제로 그렇게 한 번 no-op 였다.
-      ? { hull: String(r.hull), tmx: Number(r.tmx), tmy: Number(r.tmy), angle: Number(r.angle) }
+      ? { hull: String(r.hull), tmx: Number(r.tmx), tmy: Number(r.tmy), angle: Number(r.angle), length: Number(r.length) }
       : { hull: String(r.hull), loc: String(r.loc ?? r.위치 ?? '') });
 } catch {
   ({ rows, unknownLines } = parseListText(raw));
@@ -82,32 +82,38 @@ if (capture?.kind === 'coords') {
   //  조용히 넘어간다 — 위치 수집이 뱃머리 때문에 멈출 이유는 없다.
   const cands = (capture?.canvasMasks ?? []).filter(m => m.bits);
   if (cands.length) {
+    // 길이 검사가 동작하려면 세이프티원 length 를 같이 넘겨야 한다 — 조각을 배로
+    // 착각해 반대 방향을 쓰는 것을 막는 유일한 장치다.
     const expected = rows
-      .map(r => ({ hull: r.hull, ...(tmToYard(r.tmx, r.tmy) || {}) }))
+      .map(r => ({ hull: r.hull, length: r.length, ...(tmToYard(r.tmx, r.tmy) || {}) }))
       .filter(e => Number.isFinite(e.x));
-    // ★어느 겹이 배 레이어인지 세어 보고 고른다. 화면 구조를 추측하지 않는다.
-    let best = null, bestMask = null;
+
+    // ★여러 장을 합친다. 확대해서 구역별로 뜨므로 한 장에는 일부만 보인다.
+    //  두 장이 **서로 다른 방향**을 말하면 둘 다 버린다 — 어느 쪽이 맞는지 모르는데
+    //  하나를 고르면 그게 곧 조용한 오답이다.
+    const seen = new Map();
     for (const m of cands) {
-      const mask = unpackMask(m.bits, m.w * m.h);
-      const got = bowByHull(mask, m.w, m.h, expected);
-      console.log(`뱃머리 후보 ${m.w}x${m.h} — 도형 ${got.found} · 붙임 ${got.matched}` +
-        ` · 방향 ${got.bows.size} · 축척 ${got.scale ?? '-'} · 안붙음 ${got.unmatched ?? '-'}`);
-      // 붙은 배별 수치. 방향이 안 나오면 여기 lo/hi 가 둘 다 크게 찍힌다(= 양끝 뭉툭).
+      const got = bowByHull(unpackMask(m.bits, m.w * m.h), m.w, m.h, expected);
+      console.log(`뱃머리 [${m.at ?? '?'} z${m.zoom ?? 0}] ${m.w}x${m.h} — 도형 ${got.found}` +
+        ` · 붙임 ${got.matched} · 방향 ${got.bows.size} · 축척 ${got.scale ?? '-'}`);
       for (const r of got.rows ?? [])
-        console.log(`   ${r.hull} d=${r.d} len=${r.len} wid=${r.wid} tip ${r.lo}/${r.hi} → ${r.bow ?? '판정보류'}`);
-      if (!best || got.bows.size > best.bows.size) { best = got; bestMask = { mask, ...m }; }
+        console.log(`   ${r.hull} d=${r.d} len=${r.len} wid=${r.wid} 길이비 ${r.r ?? '-'}` +
+          ` tip ${r.lo}/${r.hi} → ${r.bow ?? '판정보류'}`);
+      for (const [hull, b] of got.bows) {
+        const prev = seen.get(hull);
+        if (prev === undefined) { seen.set(hull, b); continue; }
+        if (prev === null) continue;                                   // 이미 어긋난 것으로 표시됨
+        const diff = Math.abs(((b - prev + 540) % 360) - 180);
+        if (diff > 45) { seen.set(hull, null); console.log(`   ⚠ ${hull} 두 장이 다른 방향 — 버린다`); }
+      }
     }
-    // ★못 읽었으면 왜인지 재서 남긴다. 두 번 추측해서 두 번 틀렸다(겹 문제인 줄 알았는데
-    //  겹은 하나였다). 다음 실행은 로그만 보고 고칠 수 있어야 한다.
-    if (!best.bows.size && bestMask)
-      console.log('뱃머리 진단 — ' + JSON.stringify(diagnose(bestMask.mask, bestMask.w, bestMask.h)));
+    let n = 0;
     for (const r of named.rows) {
-      const b = best.bows.get(r.hull);
-      if (b !== undefined) r.bowDeg = b;
+      const b = seen.get(r.hull);
+      if (b !== undefined && b !== null) { r.bowDeg = b; n++; }
     }
-    console.log(best.bows.size
-      ? `뱃머리 — ${best.bows.size}척 읽음, 나머지는 관례로`
-      : '뱃머리 — 한 척도 못 읽었다. 전부 관례로 간다(위치는 정상).');
+    console.log(n ? `뱃머리 — ${n}척 읽음, 나머지는 관례로`
+                  : '뱃머리 — 한 척도 못 읽었다. 전부 관례로 간다(위치는 정상).');
   } else {
     console.log('뱃머리 — 쓸 만한 지도 캔버스가 없다. 선석 관례로 간다.');
   }
