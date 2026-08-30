@@ -9,6 +9,7 @@ import YardMap, { YARD_REGIONS, YARD_W, YARD_H, YARD_ROTS,
   contentSize, mapTransform, mapToContent, contentToMap, screenDeltaToMap,
   fullFit, type YardRegion, type YardRot } from './components/YardMap';
 import { IconUpdateNotice } from './components/IconUpdateNotice';
+import { InstallGuide } from './components/InstallGuide';
 
 enum OperationType {
   CREATE = 'create',
@@ -1321,6 +1322,8 @@ export default function App() {
     <div className="w-screen h-[100dvh] bg-[#2c3e50] font-sans overflow-hidden flex flex-col">
       {/* 아이콘이 바뀌었을 때 설치본 사용자에게 한 번만. 평소엔 아무것도 안 그린다. */}
       <IconUpdateNotice />
+      {/* 홈 화면에 추가하는 길 안내. ?install=1 또는 카톡 등 인앱브라우저일 때만. */}
+      <InstallGuide />
       {/* 좌상단: 배너 대신 동그란 버튼. 누르면 배너가 펼쳐진다.
           모드 전환(뷰어/관리자)도 이 안에 넣었다 — 따로 떠 있던 배지를 없애면서
           관리자 모드에서 빠져나올 길이 사라지지 않도록. */}

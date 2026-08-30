@@ -21,6 +21,17 @@
           Apple 문서에는 없고 우리가 실제 아이폰에서 확인한 것도 아니다 — 추론이다.) -->
     <link rel="apple-touch-icon" href="/icon-180.92540826.png" />
     <link rel="manifest" href="/manifest.json" />
+    <!-- ★`beforeinstallprompt` 는 React 가 마운트되기 **전에** 오는 경우가 많다.
+         여기서 잡아 두지 않으면 "홈 화면에 추가" 버튼을 띄울 기회를 놓친다.
+         preventDefault 로 크롬의 기본 배너를 막고, 우리 안내에서 원할 때 부른다. -->
+    <script>
+      window.__bip = null;
+      addEventListener('beforeinstallprompt', function (e) {
+        e.preventDefault();
+        window.__bip = e;
+        dispatchEvent(new Event('bip-ready'));
+      });
+    </script>
     <!-- 안드로이드 주소창·작업전환기 색. manifest 에만 있으면 설치 전에는 안 먹는다. -->
     <meta name="theme-color" content="#2c3e50" />
     <!-- 메모 글꼴. 원래 src/index.css 첫 줄의 @import 였는데, 그러면 빌드된 CSS 의
