@@ -1749,7 +1749,7 @@ export default function App() {
                   <div>
                     <div className="text-[11px] font-bold text-blue-700">오늘 공정</div>
                     {vesselPlan.today.map((it, i) => (
-                      <div key={i} className="text-gray-800 truncate">{it.label}</div>
+                      <div key={i} className="text-gray-800">{it.label}</div>
                     ))}
                   </div>
                 )}
@@ -1757,8 +1757,12 @@ export default function App() {
                   <div>
                     <div className="text-[11px] font-bold text-teal-700">다가오는 공정</div>
                     {vesselPlan.upcoming.map((it, i) => (
-                      <div key={i} className="text-gray-800 truncate">
-                        <span className="font-bold text-teal-700">D-{it.dday}</span> {it.label} <span className="text-gray-400">{it.date ? dateLabel(it.date) : ''}</span>
+                      <div key={i} className="flex gap-1.5 text-gray-800">
+                        <span className="shrink-0 font-bold tabular-nums text-teal-700">D-{it.dday}</span>
+                        <span className="min-w-0 flex-1">
+                          {it.label}
+                          <span className="text-gray-400"> {it.date ? dateLabel(it.date) : ''}</span>
+                        </span>
                       </div>
                     ))}
                   </div>
@@ -1771,8 +1775,7 @@ export default function App() {
                         <span className={`shrink-0 font-bold tabular-nums ${
                           it.dday! < 0 ? 'text-red-600' : 'text-amber-700'
                         }`}>{ddayLabel(it.dday)}</span>
-                        {/* 준비 제목은 길다. 잘라내지 말고 두 줄까지 접어서 읽히게 한다. */}
-                        <span className="min-w-0 flex-1 line-clamp-2">
+                        <span className="min-w-0 flex-1">
                           {it.label}
                           <span className="text-gray-400"> · {it.kind}{it.sub ? ` · ${it.sub}` : ''}</span>
                         </span>
