@@ -559,27 +559,37 @@ try {
     //  → 적당히만 확대해야 한다. 그 "적당히" 가 몇 노치인지는 사이트의 노치 배수를
     //    알아야 하는데 우리가 모른다. 그래서 재서 고른다.
     //
-    //  그래서 가운데에서 한 노치씩 올리며 각 단계를 한 장씩 뜬다. 합치는 쪽
-    //  (sync-safetyone.mjs)이 호선별로 읽히는 장만 쓰고 서로 어긋나면 버리므로,
-    //  쓸모없는 단계가 섞여도 손해가 없다. 로그의 덩어리 크기를 z0 과 비교하면
-    //  **한 노치가 몇 배인지가 그대로 나온다** — 그걸 보고 다음에 좁히면 된다.
-    //  위 실측대로면 k=1.5~2 근처가 가장 나을 것이다(도형 8~11).
-    const LADDER = 3;
-    const mx = box.x + box.w * 0.5, my = box.y + box.h * 0.5;
-    try {
-      await page.mouse.move(mx, my);
-      for (let z = 1; z <= LADDER; z++) {
-        await page.mouse.wheel(0, -400);
+    //  ★재 봤다 (run 30, 가운데에서 한 노치씩 올리며):
+    //     z0 도형 18 · 붙임 8 · **방향 0** — 길이비 0.42~0.82 로 전부 조각이었다(글자가 자름)
+    //     z1 도형 11 · 붙임 9 · **방향 5** — 길이비 1.07, 끝단 1.0/2.7 로 깨끗하게 갈린다
+    //     z2 도형  4 · 붙임 4 · 방향 1
+    //     z3 도형  1 · 붙임 0 · 방향 0 (진단: 덩어리 5개뿐 — 배가 화면 밖으로 나갔다)
+    //   축척이 1.125 → 0.649 로 떨어졌으니 **한 노치가 약 1.73배**다. 위 실측표의
+    //   k=1.5~2 구간과 정확히 겹치고, 거기서 도형 8~11 이 나온다던 예측도 맞았다.
+    //  → **한 노치가 정답이다.** 3노치는 다섯 배 가까이 확대한 셈이었다.
+    //
+    //  코스는 원래대로 네 구역으로 돌아간다 — 한 노치면 야드의 3분의 1쯤만 보이므로
+    //  가운데 한 장으로는 2안벽 서쪽·1BERTH 동쪽이 통째로 빠진다. 휠 확대는 마우스
+    //  자리를 중심으로 하므로 끌 필요 없이 볼 곳에 마우스를 두고 확대했다 되돌리면 된다.
+    //  z0 한 장은 그대로 남긴다. 공짜이고(추가 조작 없음) 길이 검사가 조각을 전부
+    //  걸러내므로 틀린 값이 섞일 일이 없다 — 사이트가 바뀌었을 때의 안전망이다.
+    const NOTCH = 1;
+    const spots = [[0.3, 0.35], [0.7, 0.35], [0.3, 0.65], [0.7, 0.65]];
+    for (const [fx, fy] of spots) {
+      const mx = box.x + box.w * fx, my = box.y + box.h * fy;
+      try {
+        await page.mouse.move(mx, my);
+        for (let i = 0; i < NOTCH; i++) { await page.mouse.wheel(0, -400); await page.waitForTimeout(220); }
         await page.waitForTimeout(1600);                      // 타일이 다시 그려질 시간
         const m = await grabMask();
-        if (m) canvasMasks.push({ ...m, zoom: z, at: 'center' });
+        if (m) canvasMasks.push({ ...m, zoom: NOTCH, at: `${fx},${fy}` });
+      } catch (e) {
+        console.log(`확대 캡처 실패(${fx},${fy}): ${e.message}`);
+      } finally {
+        // 반드시 원래 배율로 되돌린다 — 다음 구역이 이전 확대 위에 겹치면 안 된다.
+        for (let i = 0; i < NOTCH; i++) { await page.mouse.wheel(0, 400); await page.waitForTimeout(220); }
+        await page.waitForTimeout(900);
       }
-    } catch (e) {
-      console.log(`확대 캡처 실패: ${e.message}`);
-    } finally {
-      // 반드시 원래 배율로 되돌린다. 다음 실행이 이전 확대 위에서 시작하면 안 된다.
-      for (let i = 0; i < LADDER; i++) { await page.mouse.wheel(0, 400); await page.waitForTimeout(220); }
-      await page.waitForTimeout(900);
     }
   }
   for (const m of canvasMasks)
