@@ -93,16 +93,18 @@ export function dateLabel(iso: string): string {
   return `${Number(m)}/${Number(d)}`;
 }
 /**
- * 탱크 묶음 표기 — ` (1·2탱크)`. 탱크가 없으면 빈 문자열.
+ * 탱크 묶음 표기 — `1·2탱크 `(뒤에 공백). 탱크가 없으면 빈 문자열.
+ * ★**이름 앞에** 붙인다 (2026-08-30 사용자 지시). 뒤에 붙였더니 공정명이 길 때
+ *  `truncate` 에 잘려 탱크번호가 통째로 안 보였다 — 정작 제일 먼저 봐야 할 값이다.
  * ★공정과 준비가 **같은 함수**를 쓴다 (2026-08-30 사용자 지시로 표기를 통일했다).
  *  각자 따로 만들면 한쪽만 고치게 된다 — 실제로 공정은 `T1·T2 이름`, 준비는
  *  `이름 (1·2탱크)` 로 갈라져 있었다.
  *  ★탱크가 안 붙어 있어도 그대로 나열한다(`1·3탱크`). `1~3` 처럼 범위로 줄이면
  *   빠진 2탱크가 포함된 것처럼 보인다.
  */
-export function tankSuffix(tanks: number[]): string {
+export function tankPrefix(tanks: number[]): string {
   const t = [...new Set(tanks)].filter(v => Number.isFinite(v) && v > 0).sort((a, b) => a - b);
-  return t.length ? ` (${t.join('·')}탱크)` : '';
+  return t.length ? `${t.join('·')}탱크 ` : '';
 }
 
 /** D-day 표기. 지난 것은 `D+n`(빨강으로 보여준다). */
@@ -157,7 +159,7 @@ export async function fetchVesselPlan(hull: string): Promise<VesselPlan | null> 
       grouped.set(key, g);
     }
     for (const g of grouped.values()) {
-      const item: PlanItem = { label: `${g.name}${tankSuffix(g.tanks)}`, date: g.start, dday: diffDays(today, g.start) };
+      const item: PlanItem = { label: `${tankPrefix(g.tanks)}${g.name}`, date: g.start, dday: diffDays(today, g.start) };
       (g.start <= today ? todayItems : upcoming).push(item);
     }
     upcoming.sort((a, b) => (a.date! < b.date! ? -1 : 1));
@@ -204,7 +206,7 @@ export async function fetchVesselPlan(hull: string): Promise<VesselPlan | null> 
           const push = (tanks: number[], planned: string, trigger: string) => {
             tasks.push({
               kind: '준비',
-              label: `${rule.title}${tankSuffix(tanks)}`,
+              label: `${tankPrefix(tanks)}${rule.title}`,
               // 왼쪽 D-day 는 준비 마감일이고 이건 그 준비가 겨냥하는 공정일이라 서로 다르다.
               // 라벨이 없으면 날짜 두 개가 나란히 떠서 헷갈린다(LNG 앱과 같은 이유).
               sub: `공정 ${dateLabel(planned)}`,
