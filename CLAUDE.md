@@ -754,6 +754,38 @@ iPad mini 744x1133 / iPad Pro 834x1194 / 폰 가로 844x390 / iPad 가로 1194x8
 - 검사 항목: 가로 넘침 / 고정 요소끼리 겹침 / 첫 화면 배율.
   스크립트는 세션 스크래치의 `devices.mjs` 형태로 매번 다시 쓴다.
 
+## 📱 홈화면 아이콘·이름 (2026-08-30)
+
+### 아이콘은 `public/icon.svg` 한 장에서 나온다
+- 바꾸려면 그 파일만 갈아 끼우고 `node scripts/make-icons.mjs`. PNG 다섯 장이 다시 만들어진다.
+  (180 iOS · 192/512 manifest any · 512 maskable · 32 파비콘 폴백)
+- 새 그림의 바탕색이 다르면 스크립트의 `BG` 도 같이 바꾼다.
+- 이 기계의 크로미움 리비전이 레포 playwright 와 다르면
+  `CHROMIUM_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome node scripts/make-icons.mjs`.
+
+### ★iOS 는 `apple-touch-icon` 에 SVG 를 못 쓴다 ⭐
+- SVG 를 가리켜 두면 아이폰 홈화면에 우리 아이콘 대신 **페이지 스크린샷**이 박힌다.
+  2026-08-30 실측: 프로덕션이 `/icon.svg` 를 가리키고 있었고 PNG 는 **한 장도 없었다.**
+- iOS 는 투명 픽셀을 **검게** 칠한다. 그래서 생성기가 바탕색으로 꽉 채워 내보낸다
+  (모서리 둥근 SVG 를 그대로 쓰면 검은 귀퉁이 + iOS 둥근 마스크가 겹쳐 지저분해진다).
+
+### maskable 은 가운데 80% 만 산다
+- 안드로이드가 기기 모양으로 잘라낸다. 그림을 80% 로 줄여 가운데 놓고 나머지는 바탕색.
+- 한 파일을 `any` 와 `maskable` 로 겸용하면 둘 중 하나는 반드시 어색해진다. 따로 만든다.
+
+### ★없는 정적 파일이 200 으로 나가고 있었다 ⭐
+- SPA 폴백(`try_files ... /index.html`)이 **모든** 미스를 index.html 로 넘겨서,
+  아직 만들지도 않은 `/icon-180.png` 가 `200 · text/html · 1779B` 로 돌아왔다.
+  파일명이 하나만 틀려도 브라우저는 "받았다" 로 알고 조용히 깨진 아이콘을 쓴다.
+- 이미지·manifest 확장자는 `try_files $uri =404` 로 뺐다. js·css 는 넣지 말 것 —
+  정규식 location 이 `/assets/` prefix 보다 먼저 잡혀 1년 캐시 설정을 덮어쓴다.
+- 로컬 nginx 로 실제 응답을 확인하고 올린다(`nginx -t` 만으로는 이 문제가 안 보인다).
+
+### 제목이 안 바뀌는 것은 배포 문제가 아니었다
+- `pwa-check.yml` 로 프로덕션을 재 보면 title·apple-mobile-web-app-title·manifest 가
+  전부 새 이름이다. **이미 설치된 바로가기·홈화면 아이콘은 원본이 바뀌어도 갱신되지 않는다** —
+  지우고 다시 추가해야 한다. 확인은 추측 말고 그 액션으로 한다.
+
 ## 🖥️ 터미널 (Windows 기준)
 - **cmd 만 사용, PowerShell 금지.** `$env:` 같은 PS 문법으로 안내하지 말 것.
 - 디렉터리 이동은 `cd /d <경로>` (드라이브 달라도 한 번에 이동).
