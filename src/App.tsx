@@ -659,14 +659,14 @@ export default function App() {
     }
 
     if (hasAdminParam || isSavedAdmin || isDev) {
+      // ★열 때는 **권한만** 준다. 모드는 언제나 뷰어로 시작한다 (2026-08-30 사용자 지시).
+      //  예전에는 여기서 바로 관리자로 들어갔는데, 한 번 관리자였던 기기는 새로고침을
+      //  하든 앱을 죽였다 켜든 계속 관리자로 들어왔다 — 지도를 보려다 배를 옮기게 된다.
+      //  관리자로 들어가려면 정보(ⓘ) 배너의 「관리자로 전환」을 한 번 누른다.
+      //  ★이름 입력도 여기서 띄우지 않는다. 뷰어로 볼 사람에게 이름부터 물을 이유가 없다.
       setIsAdminUrl(true);
-      setAppMode('admin');
       const savedName = localStorage.getItem('adminName');
-      if (savedName) {
-        setAdminName(savedName);
-      } else {
-        setShowNamePrompt(true);
-      }
+      if (savedName) setAdminName(savedName);
     }
   }, []);
 
@@ -746,34 +746,31 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
+  /** 관리자로 들어간다. ★앱을 **열 때가 아니라 누를 때만** 부른다.
+   *  이름이 없으면 먼저 받는다 — 작업 이력에 남길 사람이 누구인지가 있어야 한다. */
+  const enterAdmin = () => {
+    const savedName = localStorage.getItem('adminName');
+    if (!savedName) { setShowNamePrompt(true); return; }
+    setAdminName(savedName);
+    setAppMode('admin');
+  };
+
   const handleTitleTap = async () => {
     setTapCount(prev => {
       const newCount = prev + 1;
       if (newCount >= 5) {
-        if (!user) {
-          signInWithPopup(auth, new GoogleAuthProvider()).then(() => {
-            localStorage.setItem('isAdmin', 'true');
-            setIsAdminUrl(true);
-            setAppMode('admin');
-            const savedName = localStorage.getItem('adminName');
-            if (savedName) {
-              setAdminName(savedName);
-            } else {
-              setShowNamePrompt(true);
-            }
-          }).catch((error) => {
-            console.error("Login failed", error);
-          });
-        } else {
-          localStorage.setItem('isAdmin', 'true');
+        // 제목 5번 탭은 **지금 이 자리에서 관리자가 되겠다는 뜻**이라 그대로 들어간다.
+        const grant = () => {
+          localStorage.setItem('isAdmin', 'true');   // 다음에 열 때 전환 버튼이 보이게
           setIsAdminUrl(true);
-          setAppMode('admin');
-          const savedName = localStorage.getItem('adminName');
-          if (savedName) {
-            setAdminName(savedName);
-          } else {
-            setShowNamePrompt(true);
-          }
+          enterAdmin();
+        };
+        if (!user) {
+          signInWithPopup(auth, new GoogleAuthProvider())
+            .then(grant)
+            .catch((error) => { console.error("Login failed", error); });
+        } else {
+          grant();
         }
         return 0;
       }
@@ -1318,6 +1315,15 @@ export default function App() {
     }
   };
 
+  /** 이름을 받고 관리자로 들어간다. 이름을 받으려던 이유가 그것이다. */
+  const confirmName = () => {
+    const nm = adminName.trim();
+    if (!nm) return;
+    localStorage.setItem('adminName', nm);
+    setShowNamePrompt(false);
+    setAppMode('admin');
+  };
+
   if (showNamePrompt) {
     return (
       <div className="w-screen h-[100dvh] bg-[#2c3e50] flex flex-col items-center justify-center font-sans">
@@ -1331,22 +1337,22 @@ export default function App() {
             className="border-2 border-gray-300 p-3 rounded-lg w-full mb-4 text-center text-lg font-bold text-gray-800 focus:border-blue-500 focus:outline-none"
             placeholder="예: 홍길동"
             onKeyDown={e => {
-              if (e.key === 'Enter' && adminName.trim()) {
-                localStorage.setItem('adminName', adminName.trim());
-                setShowNamePrompt(false);
-              }
+              if (e.key === 'Enter') confirmName();
             }}
           />
           <button 
-            onClick={() => {
-              if (adminName.trim()) {
-                localStorage.setItem('adminName', adminName.trim());
-                setShowNamePrompt(false);
-              }
-            }}
+            onClick={confirmName}
             className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg transition-colors"
           >
             시작하기
+          </button>
+          {/* ★물러날 길. 이 화면은 앱을 열 때의 관문이 아니라 '관리자로 전환' 도중이라,
+              마음이 바뀌면 돌아갈 수 있어야 한다 — 없으면 새로고침 말고는 길이 없다. */}
+          <button
+            onClick={() => { setShowNamePrompt(false); setAdminName(localStorage.getItem('adminName') ?? ''); }}
+            className="mt-2 w-full px-3 py-2 text-gray-500 font-bold text-sm"
+          >
+            취소하고 뷰어로 보기
           </button>
         </div>
       </div>
@@ -1390,7 +1396,7 @@ export default function App() {
             )}
             {isAdminUrl && (
               <button
-                onClick={() => setAppMode(prev => prev === 'admin' ? 'viewer' : 'admin')}
+                onClick={() => appMode === 'admin' ? setAppMode('viewer') : enterAdmin()}
                 className="mt-2 w-full px-3 py-2 bg-gray-800 hover:bg-gray-700 text-white rounded-lg font-bold text-sm"
               >
                 {appMode === 'admin' ? '👀 뷰어로 보기' : '🛠️ 관리자로 전환'}
