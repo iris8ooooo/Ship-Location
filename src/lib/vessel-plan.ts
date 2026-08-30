@@ -2,9 +2,11 @@
  * 호선 탭 카드에 보여줄 "그 호선의 오늘" — 공정관리비서(Supabase)에서 읽는다.
  *
  * 공정관리 앱으로 진입하는 대신 카드 안에서 바로 보여준다(2026-08-29 사용자 지시).
- *   - 공정(vessel_schedules): 오늘 걸쳐 있는 것 + 시작이 5일 안으로 다가온 것
- *     ("공정기준 -5일" — 2026-08-29 사용자 지시. 할일탭의 +14일과 일부러 다르다.)
+ *   - 공정(vessel_schedules): 오늘 걸쳐 있는 것 + 시작이 다가온 것
  *   - 할일: 공정관리비서 **사이드바 `할일` 탭**의 `업무`·`준비` 두 종류 (2026-08-30 사용자 지시)
+ *   둘 다 **오늘부터 5일**까지만 본다("공정기준 -5일" — 2026-08-29·08-30 사용자 지시).
+ *   ★할일탭 원본은 +14일을 보지만 여기서는 5일로 좁혔다 — 14일이면 준비만으로 카드가
+ *    꽉 찬다(실측 8206: 묶고 나서도 14일 11줄 → 5일 5줄).
  *
  * ★혼동 주의 — 공정관리비서에는 이름이 비슷한 두 곳이 있다. 2026-08-30 에 헷갈려
  *   한 번 잘못 붙였다가 통째로 되돌렸다(#72 → #73):
@@ -35,8 +37,10 @@ const HEADERS = { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` };
 /** `vessel_no` 가 이 값이면 특정 호선이 아니라 전 호선 공통 할일이다(자유 텍스트 컬럼). */
 const ALL_SHIPS = '모든호선';
 
-/** 할일탭이 미래를 보는 범위. LNG 앱 buildTodoFeed 의 withinDays 와 같다. 지연은 항상 포함. */
-const FEED_DAYS = 14;
+/** 앞으로 며칠까지 볼 것인가. **공정과 할일이 같은 값을 쓴다** — 임계값을 두 군데 두면
+ *  한쪽만 고치게 된다. 지난 것(지연)은 이 값과 무관하게 항상 올라온다.
+ *  (참고: 할일탭 원본은 14일. 여기서는 사용자 지시로 5일.) */
+const HORIZON_DAYS = 5;
 
 /**
  * 공정관리비서 표준 룰북의 공정 개수. 이보다 큰 activity_order 를 가진 호선은 DF형이라
@@ -108,8 +112,7 @@ export async function fetchVesselPlan(hull: string): Promise<VesselPlan | null> 
   const hit = cache.get(hull);
   if (hit && Date.now() - hit.at < TTL) return hit.plan;
   const today = localIso(new Date());
-  const horizon = addDays(today, 5);            // 공정 — 사용자가 정한 "공정기준 -5일"
-  const feedEnd = addDays(today, FEED_DAYS);    // 할일 — 할일탭과 같은 +14일
+  const horizon = addDays(today, HORIZON_DAYS);   // 공정·할일 공통
 
   try {
     const soft = (url: string) => fetch(url, { headers: HEADERS }).catch(() => null);
@@ -156,7 +159,7 @@ export async function fetchVesselPlan(hull: string): Promise<VesselPlan | null> 
     if (!tasksFailed) {
       // 업무 — status ≠ done 그리고 **마감일이 있는 것**만. 진행중도 올라간다.
       for (const r of [...await rTaskHull!.json(), ...await rTaskAll!.json()] as any[]) {
-        if (r.status === 'done' || !r.due_date || r.due_date > feedEnd) continue;
+        if (r.status === 'done' || !r.due_date || r.due_date > horizon) continue;
         tasks.push({
           kind: '업무', label: r.title, date: r.due_date, dday: diffDays(today, r.due_date),
           sub: `${r.category ?? ''}${r.vessel_no === ALL_SHIPS ? ' · 모든호선' : ''}`.trim(),
@@ -185,13 +188,11 @@ export async function fetchVesselPlan(hull: string): Promise<VesselPlan | null> 
           const tankFilter = Array.isArray(rule.tanks) && rule.tanks.length > 0 ? rule.tanks as number[] : null;
           const rows = [...byTank.values()].filter(v =>
             v.order === rule.activity_order && (!tankFilter || tankFilter.includes(v.tank)));
-          const push = (tank: number, planned: string) => {
-            if (done.has(`${rule.id}|${tank}`)) return;         // 이미 완료 체크한 준비
-            const trigger = addDays(planned, -(rule.lead_days ?? 7));
-            if (trigger > feedEnd) return;                       // 아직 멀었다
+          /** @param tanks 탱크별 룰이면 묶인 탱크들, 호선 묶음 룰이면 빈 배열. */
+          const push = (tanks: number[], planned: string, trigger: string) => {
             tasks.push({
               kind: '준비',
-              label: rule.per_tank === true ? `${rule.title} (${tank}탱크)` : rule.title,
+              label: tanks.length ? `${rule.title} (${tanks.join('·')}탱크)` : rule.title,
               // 왼쪽 D-day 는 준비 마감일이고 이건 그 준비가 겨냥하는 공정일이라 서로 다르다.
               // 라벨이 없으면 날짜 두 개가 나란히 떠서 헷갈린다(LNG 앱과 같은 이유).
               sub: `공정 ${dateLabel(planned)}`,
@@ -199,12 +200,33 @@ export async function fetchVesselPlan(hull: string): Promise<VesselPlan | null> 
             });
           };
           if (rule.per_tank === true) {
-            for (const v of rows) push(v.tank, v.planned);
+            // ★같은 준비가 같은 날 걸리면 한 줄로 묶는다 (2026-08-30 사용자 지시).
+            //  탱크마다 한 줄이면 8206 이 준비만 17줄이라 카드가 그걸로 꽉 찬다.
+            //  묶는 기준은 (룰, 마감일)이다. 마감일 = 공정일 − lead_days 이고 lead 는 룰마다
+            //  고정이라, 같은 마감일이면 겨냥하는 공정일도 자동으로 같다.
+            //  ★탱크가 안 붙어 있어도 그대로 나열한다(실측 `본딩샵 맨홀 불출` = 1·3탱크).
+            //   `1~3` 같은 범위로 줄이면 빠진 2탱크가 포함된 것처럼 보인다.
+            const bunch = new Map<string, { tanks: number[]; planned: string }>();
+            for (const v of rows) {
+              if (done.has(`${rule.id}|${v.tank}`)) continue;   // 이미 완료 체크한 준비
+              const trigger = addDays(v.planned, -(rule.lead_days ?? 7));
+              if (trigger > horizon) continue;                   // 아직 멀었다
+              const g = bunch.get(trigger) ?? { tanks: [], planned: v.planned };
+              g.tanks.push(v.tank);
+              bunch.set(trigger, g);
+            }
+            for (const [trigger, g] of bunch) {
+              push([...new Set(g.tanks)].sort((a, b) => a - b), g.planned, trigger);
+            }
           } else {
-            // 호선 묶음 — 적용 탱크 중 가장 이른 계획일 1건
+            // 호선 묶음 — 적용 탱크 중 가장 이른 계획일 1건. 탱크 표기가 없다.
+            if (done.has(`${rule.id}|0`)) continue;
             let earliest: string | null = null;
             for (const v of rows) if (!earliest || v.planned < earliest) earliest = v.planned;
-            if (earliest) push(0, earliest);
+            if (!earliest) continue;
+            const trigger = addDays(earliest, -(rule.lead_days ?? 7));
+            if (trigger > horizon) continue;
+            push([], earliest, trigger);
           }
         }
       }
