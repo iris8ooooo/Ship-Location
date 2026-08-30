@@ -201,7 +201,8 @@ for (const item of [...plan.moves, ...plan.creates]) {
     catch { await setDoc(doc(db, 'ships', item.hull), { ...pos, color: 'yellow', memo: '' }); }
   }
   await addDoc(collection(db, 'history'), {
-    action: cur ? `${BERTH_LABEL[item.berth]}(으)로 이동 — 3중점검` : `추가 — 3중점검 ${BERTH_LABEL[item.berth]}`,
+    // 뷰어도 보는 글귀다 — 사내 화면 이름(`3중점검`) 대신 하는 일로 적는다(칩의 「위치 확인」과 같은 말).
+    action: cur ? `${BERTH_LABEL[item.berth]}(으)로 이동 — 위치 확인` : `추가 — 위치 확인 ${BERTH_LABEL[item.berth]}`,
     shipId: item.hull, author: '자동수집', timestamp: now,
   }).catch(() => {});   // 기록은 최선노력 — 위치 반영이 먼저다
 }
