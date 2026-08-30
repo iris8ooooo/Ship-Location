@@ -165,7 +165,7 @@ export default function App() {
   const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
   const [isAddingZone, setIsAddingZone] = useState(false);
   const [newShipName, setNewShipName] = useState('');
-  /** 3중점검 리스트 붙여넣기 반영. 계획을 먼저 보여주고 확인 후에만 쓴다. */
+  /** 지도 붙여넣기(세이프티원 3중점검 리스트) 반영. 계획을 먼저 보여주고 확인 후에만 쓴다. */
   const [syncText, setSyncText] = useState('');
   const [syncOpen, setSyncOpen] = useState(false);
   const [syncPlan, setSyncPlan] = useState<import('./lib/safetyone-match.mjs').SyncPlan | null>(null);
@@ -862,7 +862,7 @@ export default function App() {
     }
   };
 
-  /** 3중점검 텍스트 → 이동 계획. 화면에 보여만 주고 아직 아무것도 안 쓴다. */
+  /** 붙여넣은 텍스트 → 이동 계획. 화면에 보여만 주고 아직 아무것도 안 쓴다. */
   const previewSync = () => {
     const { rows } = parseListText(syncText);
     if (!rows.length) { setSyncPlan(null); return; }
@@ -888,7 +888,7 @@ export default function App() {
           try { await setDoc(doc(db, 'ships', item.hull), { ...pos, color: 'yellow', memo: '', ...extra }); }
           catch { await setDoc(doc(db, 'ships', item.hull), { ...pos, color: 'yellow', memo: '' }); }
         }
-        logAction(`${BERTH_LABEL[item.berth]}(으)로 이동 — 3중점검`, item.hull);
+        logAction(`${BERTH_LABEL[item.berth]}(으)로 이동 — 지도 붙여넣기`, item.hull);
       }
       // 수집 심장박동 — 룰의 meta 항목이 배포되기 전이면 조용히 실패한다.
       setDoc(doc(db, 'meta', 'safetyone'), {
@@ -1601,13 +1601,13 @@ export default function App() {
             {isAddingZone ? '영역 추가 취소' : '마그네틱 영역 추가'}
           </button>
 
-          {/* 3중점검 리스트 붙여넣기 반영. 계획을 보여주고 확인해야만 쓴다 —
+          {/* 지도 붙여넣기. 계획을 보여주고 확인해야만 쓴다 —
               선석이 바뀐 배만 옮기고 같은 선석이면 손대지 않는다. */}
           <button
             onClick={() => { setSyncOpen(o => !o); setSyncPlan(null); }}
             className={`col-span-2 md:col-span-1 px-3 py-2 text-sm sm:text-base font-bold rounded transition-colors ${syncOpen ? 'bg-gray-400 text-white' : 'bg-teal-600 hover:bg-teal-700 text-white'}`}
           >
-            {syncOpen ? '3중점검 붙여넣기 닫기' : '3중점검 붙여넣기'}
+            {syncOpen ? '지도 붙여넣기 닫기' : '지도 붙여넣기'}
           </button>
           {syncOpen && (
             <div className="col-span-2 md:col-span-1 flex flex-col gap-2">
