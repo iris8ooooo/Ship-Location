@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Check, Copy, Download, ExternalLink, Share, X } from 'lucide-react';
+import { appName } from '../lib/app-name';
 
 /**
  * 홈 화면에 추가하는 길을 **그 사람의 브라우저에 맞춰** 안내한다.
@@ -40,7 +41,9 @@ export function InstallGuide() {
   const [show, setShow] = useState(false);
   const [bip, setBip] = useState<BIP | null>(null);
   const [copied, setCopied] = useState(false);
+  const [nameCopied, setNameCopied] = useState(false);
   const [installed, setInstalled] = useState(false);
+  const name = appName();
 
   const ua = navigator.userAgent;
   const inApp = /KAKAOTALK|NAVER\(inapp|Instagram|FBAN|FBAV|Line\//i.test(ua);
@@ -81,6 +84,9 @@ export function InstallGuide() {
 
   const copy = async () => {
     try { await navigator.clipboard.writeText(url); setCopied(true); } catch { setCopied(false); }
+  };
+  const copyName = async () => {
+    try { await navigator.clipboard.writeText(name); setNameCopied(true); } catch { setNameCopied(false); }
   };
 
   const install = async () => {
@@ -157,6 +163,10 @@ export function InstallGuide() {
           아래 공유 버튼 <Share size={13} className="inline shrink-0" /> 을 누르고
           「홈 화면에 추가」를 고르세요.
         </p>
+        <p className="m-0 mt-1 text-xs leading-snug text-amber-700">
+          ★이름 칸에 <b>옛 이름</b>이 뜰 수 있습니다. 아이폰이 예전에 기억해 둔 것이라
+          서버를 고쳐도 안 바뀝니다 — <b>지우고 「{name}」 으로 고쳐 주세요.</b>
+        </p>
         <p className="m-0 mt-1 text-xs leading-snug text-gray-500">
           공유 버튼이 안 보이면 화면을 한 번 아래로 쓸어 주소창을 띄우세요.
         </p>
@@ -193,6 +203,22 @@ export function InstallGuide() {
       </div>
       {/* 복사가 막혀도 손으로 집을 수 있게 주소를 그대로 보여 준다. */}
       <p className="m-0 mt-2 select-all break-all text-[11px] leading-tight text-gray-500">{url}</p>
+      {ios && !installed && (
+        // ★아이폰이 「홈 화면에 추가」 이름 칸에 **예전에 기억해 둔 이름**을 채워 넣는다.
+        //  서버를 아무리 고쳐도 그 칸은 안 바뀐다 — 그래서 붙여넣을 수 있게 쥐여 준다.
+        <div className="mt-2 flex items-center gap-2">
+          <span className="min-w-0 flex-1 select-all truncate text-[11px] text-gray-600">{name}</span>
+          <button
+            onClick={copyName}
+            className={`shrink-0 rounded-md border px-2 py-1 text-[11px] font-bold ${
+              nameCopied ? 'border-emerald-600 text-emerald-700' : 'border-gray-300 text-gray-600 active:bg-gray-100'
+            }`}
+          >
+            {nameCopied ? '복사됨' : '이름 복사'}
+          </button>
+        </div>
+      )}
+
     </div>
   );
 }
