@@ -92,6 +92,19 @@ export function dateLabel(iso: string): string {
   const [, m, d] = iso.split('-');
   return `${Number(m)}/${Number(d)}`;
 }
+/**
+ * 탱크 묶음 표기 — ` (1·2탱크)`. 탱크가 없으면 빈 문자열.
+ * ★공정과 준비가 **같은 함수**를 쓴다 (2026-08-30 사용자 지시로 표기를 통일했다).
+ *  각자 따로 만들면 한쪽만 고치게 된다 — 실제로 공정은 `T1·T2 이름`, 준비는
+ *  `이름 (1·2탱크)` 로 갈라져 있었다.
+ *  ★탱크가 안 붙어 있어도 그대로 나열한다(`1·3탱크`). `1~3` 처럼 범위로 줄이면
+ *   빠진 2탱크가 포함된 것처럼 보인다.
+ */
+export function tankSuffix(tanks: number[]): string {
+  const t = [...new Set(tanks)].filter(v => Number.isFinite(v) && v > 0).sort((a, b) => a - b);
+  return t.length ? ` (${t.join('·')}탱크)` : '';
+}
+
 /** D-day 표기. 지난 것은 `D+n`(빨강으로 보여준다). */
 export function ddayLabel(dday: number | null): string {
   if (dday === null) return '–';
@@ -144,8 +157,7 @@ export async function fetchVesselPlan(hull: string): Promise<VesselPlan | null> 
       grouped.set(key, g);
     }
     for (const g of grouped.values()) {
-      const tanks = [...new Set(g.tanks)].sort((a, b) => a - b).map(t => `T${t}`).join('·');
-      const item: PlanItem = { label: `${tanks} ${g.name}`, date: g.start, dday: diffDays(today, g.start) };
+      const item: PlanItem = { label: `${g.name}${tankSuffix(g.tanks)}`, date: g.start, dday: diffDays(today, g.start) };
       (g.start <= today ? todayItems : upcoming).push(item);
     }
     upcoming.sort((a, b) => (a.date! < b.date! ? -1 : 1));
@@ -192,7 +204,7 @@ export async function fetchVesselPlan(hull: string): Promise<VesselPlan | null> 
           const push = (tanks: number[], planned: string, trigger: string) => {
             tasks.push({
               kind: '준비',
-              label: tanks.length ? `${rule.title} (${tanks.join('·')}탱크)` : rule.title,
+              label: `${rule.title}${tankSuffix(tanks)}`,
               // 왼쪽 D-day 는 준비 마감일이고 이건 그 준비가 겨냥하는 공정일이라 서로 다르다.
               // 라벨이 없으면 날짜 두 개가 나란히 떠서 헷갈린다(LNG 앱과 같은 이유).
               sub: `공정 ${dateLabel(planned)}`,
@@ -204,8 +216,6 @@ export async function fetchVesselPlan(hull: string): Promise<VesselPlan | null> 
             //  탱크마다 한 줄이면 8206 이 준비만 17줄이라 카드가 그걸로 꽉 찬다.
             //  묶는 기준은 (룰, 마감일)이다. 마감일 = 공정일 − lead_days 이고 lead 는 룰마다
             //  고정이라, 같은 마감일이면 겨냥하는 공정일도 자동으로 같다.
-            //  ★탱크가 안 붙어 있어도 그대로 나열한다(실측 `본딩샵 맨홀 불출` = 1·3탱크).
-            //   `1~3` 같은 범위로 줄이면 빠진 2탱크가 포함된 것처럼 보인다.
             const bunch = new Map<string, { tanks: number[]; planned: string }>();
             for (const v of rows) {
               if (done.has(`${rule.id}|${v.tank}`)) continue;   // 이미 완료 체크한 준비
@@ -215,9 +225,7 @@ export async function fetchVesselPlan(hull: string): Promise<VesselPlan | null> 
               g.tanks.push(v.tank);
               bunch.set(trigger, g);
             }
-            for (const [trigger, g] of bunch) {
-              push([...new Set(g.tanks)].sort((a, b) => a - b), g.planned, trigger);
-            }
+            for (const [trigger, g] of bunch) push(g.tanks, g.planned, trigger);
           } else {
             // 호선 묶음 — 적용 탱크 중 가장 이른 계획일 1건. 탱크 표기가 없다.
             if (done.has(`${rule.id}|0`)) continue;
