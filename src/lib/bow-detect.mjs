@@ -38,6 +38,14 @@ export const MIN_BLOB_PX = 250;
 export const MIN_LEN = 35;
 export const MIN_ASPECT = 2.2;
 
+/**
+ * 세이프티원 length·width 단위(데시미터) → 야드 px.
+ * 실측: 8206 의 length 2990 = 299m → 도면에서 139px. 2990 × 0.04665 = 139.5.
+ */
+export const TM_UNIT_TO_YARD = 0.04665;
+/** 잰 길이가 세이프티원이 말한 길이의 이 범위 밖이면 배가 아니다(조각·뭉침). */
+export const LEN_OK_MIN = 0.75, LEN_OK_MAX = 1.3;
+
 const deg = (r) => (r * 180) / Math.PI;
 const norm360 = (a) => ((a % 360) + 360) % 360;
 
@@ -264,18 +272,33 @@ export function bowByHull(mask, W, H, expected) {
   if (!reg) return { bows, matched: 0, found: shapes.length };
   // 도형각(이미지) → 야드각: 변환의 회전분만큼 돌린다.
   const rot = deg(Math.atan2(reg.T.b, reg.T.a));
+  const scale = Math.hypot(reg.T.a, reg.T.b);
+  const byHull = new Map(expected.map(e => [e.hull, e]));
   const rows = [];
   for (const { hull, shape, dist } of reg.pairs) {
+    // ★조각을 배로 착각하면 **틀린 뱃머리를 써 버린다** (2026-08-30).
+    //  라이브 지도는 호선번호 글자를 지도 배율과 무관하게 고정 크기로 그려서, 축소된
+    //  화면에서는 글자가 선체를 가로질러 흰 도형을 두 동강 낸다(실측 run 27: 길이 49~94,
+    //  폭은 정상). 조각의 잘린 단면은 "뭉툭한 끝" 으로 읽히므로 **반대 방향이 나올 수 있다.**
+    //  세이프티원이 length 를 주므로 잰 길이가 그와 맞는지 본다. 안 맞으면 조용히 버린다 —
+    //  못 읽는 것은 선석 관례로 가면 그만이지만, 반대로 그리는 것은 사고다.
+    const want = byHull.get(hull);
+    const wantLen = want && Number.isFinite(want.length)
+      ? (want.length * TM_UNIT_TO_YARD) / scale : null;
+    const ratio = wantLen ? shape.len / wantLen : null;
+    const lenBad = ratio !== null && (ratio < LEN_OK_MIN || ratio > LEN_OK_MAX);
     rows.push({ hull, d: +dist.toFixed(1), len: +shape.len.toFixed(0), wid: +shape.wid.toFixed(1),
-                lo: +shape.tipLo.toFixed(2), hi: +shape.tipHi.toFixed(2), bow: shape.bowAt });
-    if (shape.bowDeg === null) continue;                 // 블록 — 판정하지 않는다
+                lo: +shape.tipLo.toFixed(2), hi: +shape.tipHi.toFixed(2),
+                r: ratio === null ? null : +ratio.toFixed(2),
+                bow: lenBad ? '길이불일치' : shape.bowAt });
+    if (lenBad || shape.bowDeg === null) continue;       // 조각이거나 블록 — 판정하지 않는다
     bows.set(hull, norm360(shape.bowDeg + rot));
   }
   // ★붙은 배마다 실제 수치를 같이 낸다. "왜 방향이 안 나오나" 를 로그만 보고 가르기 위한 것 —
   //  숫자(길이·폭·끝단비)뿐이라 공개 로그에 나가도 그림 내용이 아니다.
   const unmatched = shapes.length - reg.pairs.length;
   return { bows, matched: reg.pairs.length, found: shapes.length, rows, unmatched,
-           scale: +Math.hypot(reg.T.a, reg.T.b).toFixed(3) };
+           scale: +scale.toFixed(3) };
 }
 
 /**
