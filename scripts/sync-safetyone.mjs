@@ -19,7 +19,7 @@ import { initializeApp } from 'firebase/app';
 import { getFirestore, connectFirestoreEmulator, collection, getDocs, doc, setDoc, updateDoc, addDoc } from 'firebase/firestore';
 import { parseListText, planMoves, BERTH_LABEL } from '../src/lib/safetyone-match.mjs';
 import { residualMedian, namedRowsFromCoords, MAX_RESIDUAL, tmToYard } from '../src/lib/yard-transform.mjs';
-import { bowByHull, unpackMask, diagnose } from '../src/lib/bow-detect.mjs';
+import { bowByHull, unpackMask, diagnose, bowFromHeading } from '../src/lib/bow-detect.mjs';
 
 const args = process.argv.slice(2);
 const dry = args.includes('--dry');
@@ -171,8 +171,10 @@ for (const m of plan.moves) {
   const moved = Math.round(m.from.x) !== m.to.x || Math.round(m.from.y) !== m.to.y;
   // ★제자리 회전(뱃머리)이면 좌표가 아니라 **각도**가 요점이다. 그걸 보여 줘야
   //  사람이 "이 배 뱃머리가 저쪽이 맞나" 를 판단할 수 있다.
+  // ★`r` 은 마커 회전각이지 뱃머리 각이 아니다(90° 차이). 반드시 변환해서 찍는다 —
+  //  그대로 찍으면 위의 "읽은 뱃머리" 와 90° 어긋나 보여 사람이 오판한다.
   const turn = Number.isFinite(m.from.r) && m.from.r !== m.to.r
-    ? `  뱃머리 ${dir(m.from.r)} → ${dir(m.to.r)}` : '';
+    ? `  뱃머리 ${dir(bowFromHeading(m.from.r))} → ${dir(bowFromHeading(m.to.r))}` : '';
   console.log(`이동  ${m.hull}  (${Math.round(m.from.x)},${Math.round(m.from.y)})` +
     ` → ${BERTH_LABEL[m.berth]} (${m.to.x},${m.to.y})${moved ? '' : ' [제자리]'}` +
     `${m.reason ? ` <${m.reason}>` : ''}${turn}`);
