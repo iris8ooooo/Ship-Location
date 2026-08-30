@@ -497,32 +497,45 @@ if (rows.length < 5) await bail(`행을 ${rows.length}개밖에 못 읽었다 �
 //  둥글게 · 선미를 네모나게 그린다(사용자 지시, 원본 도면으로 검증).
 //  ★공개 레포다. 그림 자체는 절대 파일로 남기지 않는다 — 흰 픽셀 여부만 뽑아
 //   1비트 마스크로 넘긴다. 사내 화면 내용이 로그·아티팩트로 새지 않게 하려는 것이다.
-let canvasMask = null;
+let canvasMasks = [];
 try {
-  canvasMask = await page.evaluate(() => {
+  canvasMasks = await page.evaluate(() => {
+    // ★캔버스가 여러 겹일 수 있다 — GIS 화면은 대개 바탕지도 캔버스와 오버레이가 따로다.
+    //  가장 큰 것 하나만 집었더니 배가 2개밖에 안 잡혔다(run 23). 후보를 다 넘기고
+    //  어느 것이 배 레이어인지는 Node 가 실제로 세어 보고 고른다 — 여기서 추측하지 않는다.
+    const out = [];
     const cs = [...document.querySelectorAll('canvas')]
-      .filter(c => c.width > 400 && c.height > 400)
-      .sort((a, b) => b.width * b.height - a.width * a.height);
-    if (!cs.length) return null;
-    const c = cs[0];
-    const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
-    const n = c.width * c.height;
-    const bits = new Uint8Array((n + 7) >> 3);
-    for (let i = 0, k = 0; i < n; i++, k += 4)
-      if (d[k] > 246 && d[k + 1] > 246 && d[k + 2] > 246) bits[i >> 3] |= 1 << (i & 7);
-    let bin = '';
-    for (let i = 0; i < bits.length; i += 8192)
-      bin += String.fromCharCode(...bits.subarray(i, i + 8192));
-    return { w: c.width, h: c.height, bits: btoa(bin) };
+      .filter(c => c.width >= 400 && c.height >= 400)
+      .sort((a, b) => b.width * b.height - a.width * a.height)
+      .slice(0, 3);
+    for (const c of cs) {
+      let d;
+      try { d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; }
+      catch { out.push({ w: c.width, h: c.height, err: 'getImageData 거부(오염된 캔버스)' }); continue; }
+      const n = c.width * c.height;
+      const bits = new Uint8Array((n + 7) >> 3);
+      let white = 0;
+      for (let i = 0, k = 0; i < n; i++, k += 4)
+        if (d[k] > 246 && d[k + 1] > 246 && d[k + 2] > 246) { bits[i >> 3] |= 1 << (i & 7); white++; }
+      // 온통 희거나 거의 안 흰 겹은 배 레이어가 아니다. 마스크를 실어 보낼 것도 없다.
+      const frac = white / n;
+      if (frac < 0.0005 || frac > 0.5) { out.push({ w: c.width, h: c.height, frac, skip: true }); continue; }
+      let bin = '';
+      for (let i = 0; i < bits.length; i += 8192) bin += String.fromCharCode(...bits.subarray(i, i + 8192));
+      out.push({ w: c.width, h: c.height, frac, bits: btoa(bin) });
+    }
+    return out;
   });
-  if (canvasMask) console.log(`지도 캔버스 마스크 확보 — ${canvasMask.w}x${canvasMask.h}`);
-  else console.log('지도 캔버스를 못 찾았다 — 뱃머리는 선석 관례로 간다.');
+  for (const m of canvasMasks)
+    console.log(`지도 캔버스 후보 — ${m.w}x${m.h}` +
+      (m.err ? ` · ${m.err}` : ` · 흰비율 ${(m.frac * 100).toFixed(2)}%${m.skip ? ' (건너뜀)' : ''}`));
+  if (!canvasMasks.length) console.log('400px 이상 캔버스가 없다 — 뱃머리는 선석 관례로 간다.');
 } catch (e) {
-  // 캔버스가 오염(cross-origin)됐거나 구조가 바뀐 경우. 위치 수집은 그대로 진행한다.
+  // 위치 수집은 뱃머리 때문에 멈추지 않는다.
   console.log(`지도 캔버스를 못 읽었다(${e.message}) — 뱃머리는 선석 관례로 간다.`);
 }
 
-writeFileSync(outPath, JSON.stringify({ capturedAt: new Date().toISOString(), kind, rows, canvasMask }, null, 1));
+writeFileSync(outPath, JSON.stringify({ capturedAt: new Date().toISOString(), kind, rows, canvasMasks }, null, 1));
 console.log(`호선 ${rows.length}척 수집 (${source}, ${kind}) → ${outPath}`);
 // ★성공해도 진단을 남긴다. 실패할 때만 보이면 "그럴듯하게 틀린" 수집을 못 잡는다.
 //  실제로 그렇게 두 번 놓쳤다(전부 1안벽 / 작업내용 필드).
