@@ -1655,9 +1655,9 @@ export default function App() {
 
       {/* 오른쪽 FAB 열. 확대/축소 버튼은 없앴다 — 확대는 아래 지역 버튼과
           두 손가락 핀치(데스크톱은 휠)로 한다.
-          ★호선 카드가 떠 있으면 위로 비킨다. 이 열은 화면 세로 한가운데(y≈394~450)에
-          있고 카드는 아래에서 위로 자라 y≈266 까지 올라온다 — 그대로 두면 버튼이
-          할일 글자를 덮는다(실측 iPhone14). 카드를 닫으면 제자리로 돌아온다. */}
+          ★호선 카드가 떠 있으면 위로 비킨다. 이 열은 화면 세로 한가운데(실측 iPhone14
+          y394~450)에 있고 카드는 아래에서 위로 자라 y266 까지 올라온다 — 그대로 두면
+          버튼이 할일 글자를 덮는다. 카드를 닫으면 제자리로 돌아온다. */}
       <div className={`fixed right-3 z-50 flex flex-col gap-3 ${
         shipCardOpen ? 'top-20' : 'top-1/2 -translate-y-1/2'
       }`}>
@@ -1713,9 +1713,9 @@ export default function App() {
           당일 공정을 공정관리비서(Supabase)에서 읽어 바로 보여준다.
           공정관리 앱으로 진입하지 않는다(2026-08-29 사용자 지시). 노출 규칙은
           "공정기준 -5일": 오늘 걸친 공정 + 시작 D-5 이내 공정.
-          여기에 대시보드 밑의 `할일`(work_tasks 중 status=todo)을 D-day 순으로 같이 보여준다
-          (2026-08-30 사용자 지시). 업무탭의 `진행`·`완료` 칸은 올리지 않는다 — 08-29 에
-          빼라던 것이 그 세 칸 전부였고, 지금 넣으라는 것은 `할일` 한 칸이다. */}
+          여기에 사이드바 `할일` 탭의 `업무`·`준비` 를 D-day 순으로 같이 보여준다
+          (2026-08-30 사용자 지시). ★업무 탭의 `할일/진행/완료` 칸은 올리지 않는다 —
+          이름만 같고 다른 것이다(#72 에서 헷갈려 넣었다가 #73 에서 되돌렸다). */}
       {shipCardOpen && (
         <div
           style={{ bottom: 'calc(3rem + var(--dock-h, 4.5rem) + var(--sheet-h, 0px) + 1rem + env(safe-area-inset-bottom))' }}
@@ -1739,7 +1739,7 @@ export default function App() {
             </button>
           </div>
           {/* 많으면 이 안에서 스크롤한다. 45vh 는 아이폰SE(667)에서도 위 ⓘ 버튼을
-              덮지 않는 최대치다 — 더 키우면 지도를 가린다. */}
+              덮지 않는 최대치다 — 더 키우면 지도를 가린다(실측). */}
           <div className="mt-1.5 max-h-[45vh] overflow-y-auto overscroll-contain text-[13px] leading-snug space-y-1.5">
             {vesselPlan === 'loading' && <div className="text-gray-400">공정 일정 불러오는 중…</div>}
             {vesselPlan === 'error' && <div className="text-gray-400">공정관리 연결 실패 — 위치만 표시</div>}
@@ -1769,14 +1769,12 @@ export default function App() {
                     {vesselPlan.tasks.map((it, i) => (
                       <div key={i} className="flex gap-1.5 text-gray-800">
                         <span className={`shrink-0 font-bold tabular-nums ${
-                          it.dday === null ? 'text-gray-400' : it.dday < 0 ? 'text-red-600' : 'text-amber-700'
+                          it.dday! < 0 ? 'text-red-600' : 'text-amber-700'
                         }`}>{ddayLabel(it.dday)}</span>
-                        {/* 할일 제목은 길다. 잘라내지 말고 두 줄까지 접어서 읽히게 한다. */}
+                        {/* 준비 제목은 길다. 잘라내지 말고 두 줄까지 접어서 읽히게 한다. */}
                         <span className="min-w-0 flex-1 line-clamp-2">
                           {it.label}
-                          <span className="text-gray-400">
-                            {it.category ? ` · ${it.category}` : ''}{it.allShips ? ' · 모든호선' : ''}
-                          </span>
+                          <span className="text-gray-400"> · {it.kind}{it.sub ? ` · ${it.sub}` : ''}</span>
                         </span>
                       </div>
                     ))}
