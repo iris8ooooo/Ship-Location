@@ -515,20 +515,28 @@ try {
       const n = c.width * c.height;
       const bits = new Uint8Array((n + 7) >> 3);
       let white = 0;
-      for (let i = 0, k = 0; i < n; i++, k += 4)
-        if (d[k] > 246 && d[k + 1] > 246 && d[k + 2] > 246) { bits[i >> 3] |= 1 << (i & 7); white++; }
+      // ★배가 순백이 아닐 수도 있다. 문턱을 여러 개 같이 세어 두면 다음 실행 로그만 보고
+      //  "안 잡힌 게 문턱 탓인가" 를 바로 가른다 — 또 추측하지 않으려는 것이다.
+      const lv = [246, 235, 220, 200], cnt = [0, 0, 0, 0];
+      for (let i = 0, k = 0; i < n; i++, k += 4) {
+        const m = Math.min(d[k], d[k + 1], d[k + 2]);
+        for (let t = 0; t < lv.length; t++) if (m > lv[t]) cnt[t]++;
+        if (m > 246) { bits[i >> 3] |= 1 << (i & 7); white++; }
+      }
+      const levels = Object.fromEntries(lv.map((t, i) => [t, +(cnt[i] / n * 100).toFixed(2)]));
       // 온통 희거나 거의 안 흰 겹은 배 레이어가 아니다. 마스크를 실어 보낼 것도 없다.
       const frac = white / n;
-      if (frac < 0.0005 || frac > 0.5) { out.push({ w: c.width, h: c.height, frac, skip: true }); continue; }
+      if (frac < 0.0005 || frac > 0.5) { out.push({ w: c.width, h: c.height, frac, levels, skip: true }); continue; }
       let bin = '';
       for (let i = 0; i < bits.length; i += 8192) bin += String.fromCharCode(...bits.subarray(i, i + 8192));
-      out.push({ w: c.width, h: c.height, frac, bits: btoa(bin) });
+      out.push({ w: c.width, h: c.height, frac, levels, bits: btoa(bin) });
     }
     return out;
   });
   for (const m of canvasMasks)
     console.log(`지도 캔버스 후보 — ${m.w}x${m.h}` +
-      (m.err ? ` · ${m.err}` : ` · 흰비율 ${(m.frac * 100).toFixed(2)}%${m.skip ? ' (건너뜀)' : ''}`));
+      (m.err ? ` · ${m.err}` : ` · 흰비율 ${(m.frac * 100).toFixed(2)}%${m.skip ? ' (건너뜀)' : ''}`
+        + (m.levels ? ` · 문턱별 ${JSON.stringify(m.levels)}` : '')));
   if (!canvasMasks.length) console.log('400px 이상 캔버스가 없다 — 뱃머리는 선석 관례로 간다.');
 } catch (e) {
   // 위치 수집은 뱃머리 때문에 멈추지 않는다.

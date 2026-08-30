@@ -19,7 +19,7 @@ import { initializeApp } from 'firebase/app';
 import { getFirestore, connectFirestoreEmulator, collection, getDocs, doc, setDoc, updateDoc, addDoc } from 'firebase/firestore';
 import { parseListText, planMoves, BERTH_LABEL } from '../src/lib/safetyone-match.mjs';
 import { residualMedian, namedRowsFromCoords, MAX_RESIDUAL, tmToYard } from '../src/lib/yard-transform.mjs';
-import { bowByHull, unpackMask } from '../src/lib/bow-detect.mjs';
+import { bowByHull, unpackMask, diagnose } from '../src/lib/bow-detect.mjs';
 
 const args = process.argv.slice(2);
 const dry = args.includes('--dry');
@@ -86,12 +86,17 @@ if (capture?.kind === 'coords') {
       .map(r => ({ hull: r.hull, ...(tmToYard(r.tmx, r.tmy) || {}) }))
       .filter(e => Number.isFinite(e.x));
     // ★어느 겹이 배 레이어인지 세어 보고 고른다. 화면 구조를 추측하지 않는다.
-    let best = null;
+    let best = null, bestMask = null;
     for (const m of cands) {
-      const got = bowByHull(unpackMask(m.bits, m.w * m.h), m.w, m.h, expected);
+      const mask = unpackMask(m.bits, m.w * m.h);
+      const got = bowByHull(mask, m.w, m.h, expected);
       console.log(`뱃머리 후보 ${m.w}x${m.h} — 도형 ${got.found} · 붙임 ${got.matched} · 방향 ${got.bows.size}`);
-      if (!best || got.bows.size > best.bows.size) best = got;
+      if (!best || got.bows.size > best.bows.size) { best = got; bestMask = { mask, ...m }; }
     }
+    // ★못 읽었으면 왜인지 재서 남긴다. 두 번 추측해서 두 번 틀렸다(겹 문제인 줄 알았는데
+    //  겹은 하나였다). 다음 실행은 로그만 보고 고칠 수 있어야 한다.
+    if (!best.bows.size && bestMask)
+      console.log('뱃머리 진단 — ' + JSON.stringify(diagnose(bestMask.mask, bestMask.w, bestMask.h)));
     for (const r of named.rows) {
       const b = best.bows.get(r.hull);
       if (b !== undefined) r.bowDeg = b;

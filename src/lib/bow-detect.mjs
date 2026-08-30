@@ -292,3 +292,35 @@ export function headingFromBow(bowDeg, axisR) {
   }
   return best;
 }
+
+/**
+ * 한 척도 못 읽었을 때 **왜인지 재서** 알려준다. 추측 대신 숫자를 남기려는 것.
+ * 공개 로그에 나가는 건 개수와 크기뿐 — 그림 내용은 아니다.
+ */
+export function diagnose(mask, W, H) {
+  const all = [];
+  const seen = new Uint8Array(W * H);
+  const stack = new Int32Array(W * H);
+  for (let s = 0; s < W * H; s++) {
+    if (!mask[s] || seen[s]) continue;
+    let sp = 0; stack[sp++] = s; seen[s] = 1;
+    let n = 0;
+    while (sp > 0) {
+      const p = stack[--sp]; n++;
+      const x = p % W, y = (p - x) / W;
+      if (x > 0     && mask[p - 1] && !seen[p - 1]) { seen[p - 1] = 1; stack[sp++] = p - 1; }
+      if (x < W - 1 && mask[p + 1] && !seen[p + 1]) { seen[p + 1] = 1; stack[sp++] = p + 1; }
+      if (y > 0     && mask[p - W] && !seen[p - W]) { seen[p - W] = 1; stack[sp++] = p - W; }
+      if (y < H - 1 && mask[p + W] && !seen[p + W]) { seen[p + W] = 1; stack[sp++] = p + W; }
+    }
+    if (n >= 50) all.push(n);
+  }
+  all.sort((a, b) => b - a);
+  const bucket = (lo, hi) => all.filter(n => n >= lo && n < hi).length;
+  return {
+    덩어리: all.length,
+    크기별: { '50~199': bucket(50, 200), '200~499': bucket(200, 500),
+              '500~899': bucket(500, 900), '900이상': bucket(900, Infinity) },
+    큰것10: all.slice(0, 10),
+  };
+}
