@@ -1415,29 +1415,32 @@ export default function App() {
         className={`fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] z-50 transition-transform duration-300 ease-in-out ${isHistoryOpen ? 'translate-y-0' : 'translate-y-[calc(100%-48px)]'}`}
       >
         <div 
-          className="h-12 flex items-center justify-between px-4 cursor-pointer border-b border-gray-200"
+          className="h-12 flex items-center justify-between gap-2 px-4 cursor-pointer border-b border-gray-200"
           onClick={() => setIsHistoryOpen(!isHistoryOpen)}
         >
-          <div className="flex items-center gap-2">
-            <h4 className="font-bold text-sm text-gray-800">최근 업데이트</h4>
+          {/* ★이 줄은 넷이 자리를 다툰다: 제목 · 수집 칩 · 최근 이력 요약 · 화살표.
+              좁아질 때 줄어들 것은 **이력 요약 하나**다 — 제목과 칩은 shrink-0 로 굳힌다.
+              (칩에 shrink-0 이 없어서 「3중점검 25분 전」의 뒷부분이 잘렸다 — 사용자 보고) */}
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <h4 className="shrink-0 font-bold text-sm text-gray-800">최근 업데이트</h4>
             {lastSync !== null && (() => {
               // "몇 시간째 그대로" 와 "수집이 죽음" 이 구분돼야 한다.
               // 기준은 SYNC_STALE_MIN 한 곳에서만 정한다.
               const mins = Math.floor((Date.now() - lastSync) / 60000);
               const label = mins < 60 ? `${mins}분 전` : `${Math.floor(mins / 60)}시간 전`;
               return (
-                <span className={`text-[10px] px-1.5 py-0.5 rounded-full whitespace-nowrap ${mins > SYNC_STALE_MIN ? 'bg-red-100 text-red-700' : 'bg-teal-50 text-teal-700'}`}>
+                <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full whitespace-nowrap ${mins > SYNC_STALE_MIN ? 'bg-red-100 text-red-700' : 'bg-teal-50 text-teal-700'}`}>
                   3중점검 {label}
                 </span>
               );
             })()}
             {!isHistoryOpen && history.length > 0 && (
-              <span className="text-xs text-gray-600 truncate max-w-[200px] sm:max-w-xs">
+              <span className="min-w-0 flex-1 truncate text-xs text-gray-600">
                 <span className="font-bold text-blue-600">{history[0].author}</span>님이 <span className="font-semibold">{history[0].shipId}</span>호 {history[0].action}
               </span>
             )}
           </div>
-          <div className="text-gray-500">
+          <div className="shrink-0 text-gray-500">
             {isHistoryOpen ? <ChevronDown size={20} /> : <ChevronUp size={20} />}
           </div>
         </div>
