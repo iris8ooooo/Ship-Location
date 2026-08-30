@@ -413,15 +413,15 @@ a.download='safetyone-map.png';a.href=c.toDataURL('image/png');a.click();})()
   구분하기 위한 것. ★임계값은 `SYNC_PERIOD_H` 한 곳에서 내려온다(App.tsx). 크론을 바꾸면
   그 상수도 같이 바꾼다. 주기와 똑같이 잡으면 깃허브 크론이 몇 분 밀릴 때마다 빨개진다
   (스케줄 워크플로는 부하 때 지연·유실된다).
-  ★**룰 배포가 막혀 있어 칩이 안 뜬다 (2026-08-30 원인 확정).** 배포 워크플로
-  (`deploy-firestore-rules.yml`)는 딱 한 번 돌고 403 으로 죽었다 —
-  `firebaserules.googleapis.com/.../:test had HTTP Error: 403`. 문법 오류가 아니라
-  **권한**이다. `github-deployer@lng-works-482811.iam.gserviceaccount.com` 에
-  `roles/firebaserules.admin` 이 없다(가진 건 run.admin·cloudbuild·artifactregistry·
-  storage·logging.viewer·iam.serviceAccountUser 여섯 개).
-  → `scripts/setup-gcp.sh` 의 역할 목록에 추가해 뒀으니 그 스크립트를 다시 돌리면 붙는다.
-  IAM 부여는 프로젝트 관리자만 할 수 있어 **클로드가 대신 못 한다**(서비스 계정이 스스로에게
-  관리자 권한을 주는 꼴이라 있어서도 안 된다). 배포 전에는 칩이 안 뜰 뿐 나머지는 다 동작한다.
+  ★**룰 배포는 2026-08-30 에 풀렸다.** 그 전에는 배포 워크플로가 403 으로 죽어 있었다 —
+  `github-deployer@lng-works-482811.iam.gserviceaccount.com` 에 `roles/firebaserules.admin`
+  이 없었다(문법 오류가 아니라 권한). 사용자가 권한을 준 뒤 배포 성공 → 수집 로그에서
+  `PERMISSION_DENIED` 가 사라지고 심장박동이 처음으로 기록됐다. `scripts/setup-gcp.sh` 의
+  역할 목록에도 넣어 뒀다.
+  ★**칩은 ⓘ 배너가 아니라 화면 맨 아래 「최근 업데이트」 바의 제목 옆**에 있다. 그 줄은
+  넷이 자리를 다툰다(제목 · 칩 · 최근 이력 요약 · 화살표). 좁아질 때 줄어들 것은
+  **이력 요약 하나**이므로 제목과 칩에 `shrink-0` 를 준다 — 없으면 칩이 눌려
+  「3중점검 25분 전」의 뒷부분이 잘린다(사용자 보고, 기기 6종 실측으로 확인·수정).
 - ★체크인된 `firestore.rules` 는 `is boolean` 오타로 **애초에 배포 불가능한 파일**이었다
   (룰 언어는 `bool`). 고쳐뒀다. 즉 프로덕션 룰은 이 파일과 다른 무언가다 — 배포 전
   프로덕션에서 어떤 쓰기가 되는지는 폴백 로직이 흡수한다.
