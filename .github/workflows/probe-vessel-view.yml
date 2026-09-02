@@ -1,0 +1,74 @@
+name: Probe vessel view
+
+# 세부 검사 줄이 화면에 안 보인다는 보고를 받고 만든 눈.
+# 이 레포를 만지는 세션은 샌드박스라 run.app 에도 supabase.co 에도 못 닿는다 —
+# "코드가 맞다" 와 "실서버가 그 데이터를 준다" 는 다른 얘기이고, 후자는 여기서만 잴 수 있다.
+#
+# ★공개 레포다. 공정명·날짜 같은 사내 데이터는 찍지 않는다. **개수와 상태코드만** 찍는다.
+#  anon publishable 키는 이미 번들과 소스에 들어 있는 공개 키라 새로 새는 것이 없다.
+
+on:
+  workflow_dispatch:
+
+env:
+  URL: https://hd-ship-location-238928524992.us-west1.run.app
+  SUPA: https://ltjdaviuglvswkgxmkvl.supabase.co/rest/v1
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 배포된 번들이 뷰를 읽는 코드인가
+        run: |
+          set -o pipefail
+          {
+            echo "## 프로덕션 번들 (`date -u +%FT%TZ`)"
+            echo '```'
+            curl -sS -D /tmp/h -o /tmp/index.html "$URL/"
+            grep -iE '^(HTTP|cache-control|etag|last-modified)' /tmp/h || true
+            BUNDLE=$(grep -oE '/assets/index-[A-Za-z0-9_-]+\.js' /tmp/index.html | head -1)
+            echo "bundle: ${BUNDLE:-(못 찾음)}"
+            curl -sS -o /tmp/app.js "$URL$BUNDLE"
+            echo "bundle bytes: $(wc -c < /tmp/app.js)"
+            echo "vessel_schedule_rows 등장: $(grep -c 'vessel_schedule_rows' /tmp/app.js || true)"
+            echo "vessel_schedules(옛) 등장: $(grep -c 'vessel_schedules' /tmp/app.js || true)"
+            echo "sub_key 등장: $(grep -c 'sub_key' /tmp/app.js || true)"
+            echo '```'
+          } >> $GITHUB_STEP_SUMMARY
+
+      - name: 실서버 PostgREST 가 뷰를 주는가
+        run: |
+          set -o pipefail
+          KEY=$(grep -oE "sb_publishable_[A-Za-z0-9_-]+" src/lib/vessel-plan.ts | head -1)
+          probe () {   # $1 = 경로,  $2 = 설명
+            CODE=$(curl -sS -o /tmp/r.json -w '%{http_code}' "$SUPA/$1" \
+              -H "apikey: $KEY" -H "Authorization: Bearer $KEY")
+            N=$(node -e 'const d=require("fs").readFileSync("/tmp/r.json","utf8");try{const j=JSON.parse(d);console.log(Array.isArray(j)?j.length:"(배열아님)")}catch{console.log("(JSON아님)")}')
+            SUB=$(node -e 'try{const j=JSON.parse(require("fs").readFileSync("/tmp/r.json","utf8"));console.log(Array.isArray(j)?j.filter(r=>r.sub_key!=null).length:"-")}catch{console.log("-")}')
+            ERR=$(node -e 'try{const j=JSON.parse(require("fs").readFileSync("/tmp/r.json","utf8"));console.log(j&&!Array.isArray(j)?((j.code||"")+" "+(j.message||"")).slice(0,120):"")}catch{console.log("")}')
+            echo "$2 → http=$CODE rows=$N sub_key있는행=$SUB ${ERR:+오류=$ERR}"
+          }
+          {
+            echo
+            echo '## 실서버 PostgREST'
+            echo '```'
+            probe 'vessel_schedule_rows?vessel_no=eq.8206&select=activity_order,sub_key' '뷰 8206'
+            probe 'vessel_schedule_rows?vessel_no=eq.8263&select=activity_order,sub_key' '뷰 8263'
+            probe 'vessel_schedules?vessel_no=eq.8206&select=activity_order'              '옛 테이블 8206'
+            echo '```'
+          } >> $GITHUB_STEP_SUMMARY
+
+      - name: 판정
+        run: |
+          KEY=$(grep -oE "sb_publishable_[A-Za-z0-9_-]+" src/lib/vessel-plan.ts | head -1)
+          CODE=$(curl -sS -o /tmp/v.json -w '%{http_code}' \
+            "$SUPA/vessel_schedule_rows?vessel_no=eq.8206&select=activity_order,sub_key" \
+            -H "apikey: $KEY" -H "Authorization: Bearer $KEY")
+          BUNDLE=$(grep -oE '/assets/index-[A-Za-z0-9_-]+\.js' /tmp/index.html | head -1)
+          HITS=$(grep -c 'vessel_schedule_rows' /tmp/app.js || true)
+          FAIL=0
+          [ "$CODE" = "200" ] || { echo "::error::실서버가 뷰를 안 준다 (http=$CODE). PostgREST 스키마 캐시나 권한 문제다."; FAIL=1; }
+          [ "$HITS" -ge 1 ] || { echo "::error::배포된 번들에 vessel_schedule_rows 가 없다. 옛 번들이 서비스되고 있다."; FAIL=1; }
+          exit $FAIL
