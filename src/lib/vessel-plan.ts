@@ -34,6 +34,12 @@
  *     `tank_no`·`applicable` 은 부모 것, `id` 는 음수.
  *   ★**종류를 코드에 박지 않는다.** `tw_85`·`final` 같은 값을 분기에 쓰면 새 종류가 생길 때마다
  *    십로케이션을 고쳐야 한다. `sub_key` 가 있냐 없냐만 본다.
+ *   ★표기는 **`[19 세부]` 처럼 부모 공정 번호를 앞에 붙인다** (2026-09-03 사용자 지시).
+ *    처음엔 `└` 들여쓰기를 썼는데 **이 목록은 표가 아니라 날짜순 피드**라 부모가 바로 위에 없다.
+ *    `└` 는 "바로 위 줄에 딸린 것" 이라는 뜻이므로 날짜순에서는 거짓말이 된다 —
+ *    부모가 5일 창 밖이면 아예 없고, 있어도 다른 날짜라 멀리 떨어져 있다.
+ *    번호를 적으면 어느 공정의 세부인지가 줄 하나로 닫힌다. (`└` 는 공정 번호순 표에서만 맞다.)
+ *    부모 번호는 `floor(activity_order)` 다 — 19.5 → 19.
  *
  * ★뷰로 바꾸면서 **조용히 깨질 자리 둘**을 같이 막았다(실제로 깨지기 전에 잡은 것이다):
  *   ① `activity_order` 자료형이 **integer → numeric** 으로 바뀐다(실측: 테이블 integer,
@@ -76,7 +82,9 @@ export interface PlanItem {
   date: string | null;
   /** 오늘 기준 D-day. 음수 = 지났음(지연). */
   dday: number | null;
-  /** 부모 공정에서 떨어져 나온 세부 검사(뷰의 `sub_key` 있는 행). 화면에서 `└` 로 표시한다. */
+  /** 부모 공정에서 떨어져 나온 세부 검사(뷰의 `sub_key` 있는 행).
+   *  표기는 `label` 이 이미 `[19 세부]` 로 달고 있다 — 이 값은 그 사실 자체다(테스트가 문자열
+   *  대신 이걸로 판정한다). 화면이 따로 꾸미지 않는다. */
   detail?: boolean;
 }
 
@@ -169,24 +177,29 @@ export async function fetchVesselPlan(hull: string): Promise<VesselPlan | null> 
     const todayItems: PlanItem[] = [];
     const upcoming: PlanItem[] = [];
     // 같은 공정이 탱크만 다르게 같은 날 시작하면 한 줄로 묶는다 (T1·T2 …).
-    const grouped = new Map<string, { tanks: number[]; name: string; start: string; detail: boolean }>();
+    const grouped = new Map<string, { tanks: number[]; name: string; start: string; parent: number | null }>();
     for (const r of schedRows) {
       if (r.status !== 'pending' || r.applicable === false || !r.planned_start_date) continue;
       if (r.planned_start_date > horizon) continue;
       const end = addDays(r.planned_start_date, Math.max(1, r.duration_days ?? 1) - 1);
       if (end < today) continue;                       // 이미 끝난 창(pending 이어도) — 지연분은 소음이라 뺀다
-      // 묶음 키에 sub_key 를 넣는다 — 세부 검사가 부모와 같은 이름·같은 날이면 한 줄로 뭉쳐
-      // 세부인지 아닌지가 사라진다. 지금은 이름이 달라 안 겹치지만 그건 우연이다.
-      const key = `${r.sub_key ?? ''}|${r.activity_name}|${r.planned_start_date}`;
+      // 세부 행이면 부모 공정 번호(19.5 → 19). 부모 행이면 null.
+      const parent = r.sub_key != null ? Math.floor(Number(r.activity_order)) : null;
+      // 묶음 키에 sub_key 와 부모 번호를 넣는다 — 세부 검사가 부모와 같은 이름·같은 날이면
+      // 한 줄로 뭉쳐 세부인지 아닌지가 사라지고, 같은 세부가 서로 다른 부모에 걸리면
+      // 둘 중 한 번호만 살아남는다. 지금은 안 겹치지만 그건 우연이다.
+      const key = `${r.sub_key ?? ''}|${parent ?? ''}|${r.activity_name}|${r.planned_start_date}`;
       const g = grouped.get(key)
-        ?? { tanks: [], name: r.activity_name, start: r.planned_start_date, detail: r.sub_key != null };
+        ?? { tanks: [], name: r.activity_name, start: r.planned_start_date, parent };
       g.tanks.push(r.tank_no);
       grouped.set(key, g);
     }
     for (const g of grouped.values()) {
+      // 탱크 → 부모번호 → 이름 순. 제일 먼저 봐야 할 값이 앞에 온다(탱크 표기와 같은 이유).
+      const mark = g.parent != null ? `[${g.parent} 세부] ` : '';
       const item: PlanItem = {
-        label: `${tankPrefix(g.tanks)}${g.name}`, date: g.start, dday: diffDays(today, g.start),
-        ...(g.detail ? { detail: true } : {}),
+        label: `${tankPrefix(g.tanks)}${mark}${g.name}`, date: g.start, dday: diffDays(today, g.start),
+        ...(g.parent != null ? { detail: true } : {}),
       };
       (g.start <= today ? todayItems : upcoming).push(item);
     }

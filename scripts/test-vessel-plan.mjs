@@ -57,6 +57,12 @@ const SCHED = {
     { tank_no: 1, activity_order: '36.5', activity_name: '막판 검사', planned_start_date: day(3), duration_days: 1, applicable: true, actual_start_date: null, status: 'pending', sub_key: 'final' },
     { tank_no: 1, activity_order: '25', activity_name: '패싱홀 클로징', planned_start_date: day(12), duration_days: 1, applicable: true, actual_start_date: null, status: 'pending', sub_key: null },
   ],
+  // ⑥ 부모는 창 밖(D+12)이고 세부만 창 안(D+3) — 실제로 이 꼴이 흔하다.
+  //    `└` 가 거짓말이 되는 바로 그 상황이라 번호 표기가 필요하다.
+  F: [
+    { tank_no: 1, activity_order: 36, activity_name: '마지막 공정', planned_start_date: day(12), duration_days: 1, applicable: true, actual_start_date: null, status: 'pending', sub_key: null },
+    { tank_no: 1, activity_order: 36.5, activity_name: '막판 검사', planned_start_date: day(3), duration_days: 1, applicable: true, actual_start_date: null, status: 'pending', sub_key: 'final' },
+  ],
   // ⑤ 세부 행이 준비 계산에 끼어들지 않는가 — 25번 세부(25.5)가 더 이른 날짜를 갖는다.
   //    끼어들면 준비 마감일이 그쪽으로 당겨져 틀린 날이 나온다.
   E: [
@@ -94,15 +100,28 @@ const A = await fetchVesselPlan('A');
 ok(usedTable === 'vessel_schedule_rows', `테이블이 아니라 뷰를 읽는다 (실제: ${usedTable})`);
 const tw = A.upcoming.find(i => i.label.includes('8.5단 SPRAY PIPE T/W'));
 ok(!!tw, '세부 검사 줄이 나온다');
-ok(tw?.label === '3·4탱크 8.5단 SPRAY PIPE T/W',
-  `탱크가 묶여 앞에 붙는다 (실제: ${tw?.label})`);
-ok(tw?.detail === true, '세부 행에 detail 표시가 붙는다 (화면의 └)');
-ok(A.upcoming.find(i => i.label === '부모 공정')?.detail === undefined,
-  '부모 행에는 detail 이 안 붙는다');
+ok(tw?.label === '3·4탱크 [19 세부] 8.5단 SPRAY PIPE T/W',
+  `탱크 → 부모번호 → 이름 순으로 붙는다 (실제: ${tw?.label})`);
+ok(tw?.detail === true, '세부 행에 detail 표시가 붙는다');
+ok(!labels(A.upcoming).some(l => l.includes('└')),
+  '날짜순 목록에는 └ 를 쓰지 않는다 (부모가 바로 위에 없으므로 거짓말이 된다)');
+ok(labels(A.upcoming).filter(l => l.includes('세부')).length === 1,
+  `세부 표시가 붙은 줄은 세부 행뿐이다 (실제 ${labels(A.upcoming).filter(l => l.includes('세부')).length}줄)`);
+// 부모 행도 탱크 접두어는 붙는다 — 빠지는 것은 `[n 세부]` 뿐이다.
+const par = A.upcoming.find(i => i.label.endsWith('부모 공정'));
+ok(par?.label === '3탱크 부모 공정',
+  `부모 행에는 번호 표시가 안 붙는다 (실제: ${par?.label})`);
+ok(par?.detail === undefined, '부모 행에는 detail 이 안 붙는다');
 ok(!labels(A.upcoming).some(l => l.includes('창 밖')),
   'D-5 창 밖의 세부 검사는 안 나온다');
 ok(!labels(A.upcoming).some(l => l.includes('tw_85') || l.includes('final')),
   'sub_key 값이 화면 글귀에 새지 않는다');
+
+console.log('\n[1-2] 부모 번호는 floor(activity_order) 다');
+const F = await fetchVesselPlan('F');
+const f = F.upcoming[0];
+ok(f?.label === '1탱크 [36 세부] 막판 검사',
+  `36.5 → [36 세부] (실제: ${f?.label})`);
 
 console.log('\n[2] 세부 행 때문에 표준 호선이 DF 로 오인되지 않는가');
 const B = await fetchVesselPlan('B');
