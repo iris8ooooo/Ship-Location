@@ -36,7 +36,7 @@ jobs:
             echo "vessel_schedules(옛) 등장: $(grep -c 'vessel_schedules' /tmp/app.js || true)"
             echo "sub_key 등장: $(grep -c 'sub_key' /tmp/app.js || true)"
             echo '```'
-          } >> $GITHUB_STEP_SUMMARY
+          } | tee -a $GITHUB_STEP_SUMMARY
 
       - name: 실서버 PostgREST 가 뷰를 주는가
         run: |
@@ -58,7 +58,7 @@ jobs:
             probe 'vessel_schedule_rows?vessel_no=eq.8263&select=activity_order,sub_key' '뷰 8263'
             probe 'vessel_schedules?vessel_no=eq.8206&select=activity_order'              '옛 테이블 8206'
             echo '```'
-          } >> $GITHUB_STEP_SUMMARY
+          } | tee -a $GITHUB_STEP_SUMMARY
 
       - name: 판정
         run: |
@@ -71,4 +71,7 @@ jobs:
           FAIL=0
           [ "$CODE" = "200" ] || { echo "::error::실서버가 뷰를 안 준다 (http=$CODE). PostgREST 스키마 캐시나 권한 문제다."; FAIL=1; }
           [ "$HITS" -ge 1 ] || { echo "::error::배포된 번들에 vessel_schedule_rows 가 없다. 옛 번들이 서비스되고 있다."; FAIL=1; }
+          SUB=$(node -e 'try{const j=JSON.parse(require("fs").readFileSync("/tmp/v.json","utf8"));console.log(Array.isArray(j)?j.filter(r=>r.sub_key!=null).length:0)}catch{console.log(0)}')
+          echo "8206 세부행 수: $SUB"
+          [ "$SUB" -ge 1 ] || { echo "::error::실서버가 200 을 주지만 **세부 행이 하나도 없다**. 부모만 오는 것이다."; FAIL=1; }
           exit $FAIL
