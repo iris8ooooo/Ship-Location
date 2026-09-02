@@ -2,7 +2,7 @@
  * 호선 탭 카드에 보여줄 "그 호선의 오늘" — 공정관리비서(Supabase)에서 읽는다.
  *
  * 공정관리 앱으로 진입하는 대신 카드 안에서 바로 보여준다(2026-08-29 사용자 지시).
- *   - 공정(vessel_schedules): 오늘 걸쳐 있는 것 + 시작이 다가온 것
+ *   - 공정(vessel_schedule_rows): 오늘 걸쳐 있는 것 + 시작이 다가온 것
  *   - 할일: 공정관리비서 **사이드바 `할일` 탭**의 `업무`·`준비` 두 종류 (2026-08-30 사용자 지시)
  *   둘 다 **오늘부터 5일**까지만 본다("공정기준 -5일" — 2026-08-29·08-30 사용자 지시).
  *   ★할일탭 원본은 +14일을 보지만 여기서는 5일로 좁혔다 — 14일이면 준비만으로 카드가
@@ -26,8 +26,28 @@
  *   그래서 `neq.`·`not.is.null`·`in.(...)` 을 쓰지 않고 넉넉히 받아 코드에서 거른다
  *   (한 호선당 공정 144행·업무 14행 이하라 부담이 없다).
  *
+ * ★공정은 테이블이 아니라 **뷰 `vessel_schedule_rows`** 를 읽는다 (2026-09-02).
+ *   한 공정에 묶여 있던 검사가 다른 날 따로 잡히는 경우가 생겼고(부모 행의 `sub_items` jsonb),
+ *   공정관리 쪽이 그걸 별도 행으로 펼친 읽기전용 뷰를 만들어 뒀다.
+ *   · `sub_key === null` → 예전 그대로의 공정 행 (뷰의 부모 행 1678건 = 테이블 행 수와 일치, 실측)
+ *   · `sub_key` 있음 → 세부 검사 행. `activity_order` 는 부모 + 0.5, `duration_days` 1,
+ *     `tank_no`·`applicable` 은 부모 것, `id` 는 음수.
+ *   ★**종류를 코드에 박지 않는다.** `tw_85`·`final` 같은 값을 분기에 쓰면 새 종류가 생길 때마다
+ *    십로케이션을 고쳐야 한다. `sub_key` 가 있냐 없냐만 본다.
+ *
+ * ★뷰로 바꾸면서 **조용히 깨질 자리 둘**을 같이 막았다(실제로 깨지기 전에 잡은 것이다):
+ *   ① `activity_order` 자료형이 **integer → numeric** 으로 바뀐다(실측: 테이블 integer,
+ *      뷰 numeric). PostgREST 가 numeric 을 문자열로 내보내면 `v.order === rule.activity_order`
+ *      (prep_rules 는 integer)가 **전부 false** 가 되어 준비가 통째로 사라진다. 에러가 아니라
+ *      빈 목록이라 아무도 모른다. 이 개발환경은 프록시가 supabase.co 를 막아 실서버로 확인할
+ *      방법이 없으므로 **읽는 자리에서 `Number()` 로 못박는다** — 어느 쪽이든 안전하다.
+ *   ② DF 판정(`max activity_order > 36`)에 세부 행이 섞이면, 표준 호선의 36번 공정에 세부
+ *      검사가 붙는 순간 36.5 > 36 이 되어 **DF 로 오인**되고 준비가 통째로 사라진다.
+ *      지금은 세부가 19.5·1.5 뿐이라 안 걸리지만(실측) 시간문제였다. **부모 행만 보고 판정한다.**
+ *
  * anon 키는 공개용이다(브라우저 번들에 실리는 publishable key, RLS 가 접근을 정한다).
  * 세 테이블 모두 anon SELECT 정책이 열려 있음을 확인했다(2026-08-30).
+ * 뷰도 anon SELECT 가 열려 있고 `security_invoker=true` 라 밑 테이블의 RLS 를 그대로 탄다(2026-09-02 확인).
  */
 
 const SUPA_URL = 'https://ltjdaviuglvswkgxmkvl.supabase.co/rest/v1';
@@ -56,6 +76,8 @@ export interface PlanItem {
   date: string | null;
   /** 오늘 기준 D-day. 음수 = 지났음(지연). */
   dday: number | null;
+  /** 부모 공정에서 떨어져 나온 세부 검사(뷰의 `sub_key` 있는 행). 화면에서 `└` 로 표시한다. */
+  detail?: boolean;
 }
 
 export interface TaskItem extends PlanItem {
@@ -132,8 +154,8 @@ export async function fetchVesselPlan(hull: string): Promise<VesselPlan | null> 
   try {
     const soft = (url: string) => fetch(url, { headers: HEADERS }).catch(() => null);
     const [rSched, rTaskHull, rTaskAll, rRules, rChecks] = await Promise.all([
-      fetch(byVessel('vessel_schedules', hull,
-        'tank_no,activity_order,activity_name,planned_start_date,duration_days,applicable,actual_start_date,status'),
+      fetch(byVessel('vessel_schedule_rows', hull,
+        'tank_no,activity_order,activity_name,planned_start_date,duration_days,applicable,actual_start_date,status,sub_key'),
         { headers: HEADERS }),
       soft(byVessel('work_tasks', hull, 'title,category,due_date,status,vessel_no')),
       soft(byVessel('work_tasks', ALL_SHIPS, 'title,category,due_date,status,vessel_no')),
@@ -147,19 +169,25 @@ export async function fetchVesselPlan(hull: string): Promise<VesselPlan | null> 
     const todayItems: PlanItem[] = [];
     const upcoming: PlanItem[] = [];
     // 같은 공정이 탱크만 다르게 같은 날 시작하면 한 줄로 묶는다 (T1·T2 …).
-    const grouped = new Map<string, { tanks: number[]; name: string; start: string }>();
+    const grouped = new Map<string, { tanks: number[]; name: string; start: string; detail: boolean }>();
     for (const r of schedRows) {
       if (r.status !== 'pending' || r.applicable === false || !r.planned_start_date) continue;
       if (r.planned_start_date > horizon) continue;
       const end = addDays(r.planned_start_date, Math.max(1, r.duration_days ?? 1) - 1);
       if (end < today) continue;                       // 이미 끝난 창(pending 이어도) — 지연분은 소음이라 뺀다
-      const key = `${r.activity_name}|${r.planned_start_date}`;
-      const g = grouped.get(key) ?? { tanks: [], name: r.activity_name, start: r.planned_start_date };
+      // 묶음 키에 sub_key 를 넣는다 — 세부 검사가 부모와 같은 이름·같은 날이면 한 줄로 뭉쳐
+      // 세부인지 아닌지가 사라진다. 지금은 이름이 달라 안 겹치지만 그건 우연이다.
+      const key = `${r.sub_key ?? ''}|${r.activity_name}|${r.planned_start_date}`;
+      const g = grouped.get(key)
+        ?? { tanks: [], name: r.activity_name, start: r.planned_start_date, detail: r.sub_key != null };
       g.tanks.push(r.tank_no);
       grouped.set(key, g);
     }
     for (const g of grouped.values()) {
-      const item: PlanItem = { label: `${tankPrefix(g.tanks)}${g.name}`, date: g.start, dday: diffDays(today, g.start) };
+      const item: PlanItem = {
+        label: `${tankPrefix(g.tanks)}${g.name}`, date: g.start, dday: diffDays(today, g.start),
+        ...(g.detail ? { detail: true } : {}),
+      };
       (g.start <= today ? todayItems : upcoming).push(item);
     }
     upcoming.sort((a, b) => (a.date! < b.date! ? -1 : 1));
@@ -182,26 +210,33 @@ export async function fetchVesselPlan(hull: string): Promise<VesselPlan | null> 
 
       // 준비 — 공정 계획일에서 lead_days 를 뺀 날이 트리거다.
       // 룰은 표준 룰북 기준이라 DF형 호선(activity_order > RULEBOOK_LEN)은 통째로 제외한다.
-      const isDF = schedRows.some(r => (r.activity_order ?? 0) > RULEBOOK_LEN);
+      // ★부모 행만 본다. 세부 행(부모+0.5)을 섞으면 36번 공정에 세부가 붙는 순간
+      //  36.5 > 36 이라 표준 호선이 DF 로 오인되고 준비가 통째로 사라진다.
+      const isDF = schedRows.some(r => r.sub_key == null && Number(r.activity_order ?? 0) > RULEBOOK_LEN);
       if (!isDF) {
         const done = new Set(((await rChecks!.json()) as any[]).map(c => `${c.rule_id}|${c.tank_no ?? 0}`));
         // (공정순번|탱크) → 가장 이른 **미실행** 계획일
         const byTank = new Map<string, { order: number; tank: number; planned: string }>();
         for (const r of schedRows) {
+          if (r.sub_key != null) continue;               // 준비 룰은 부모 공정 번호에 걸린다
           if (r.applicable === false || r.actual_start_date || r.status === 'completed') continue;
           if (!r.planned_start_date) continue;
           const tank = r.tank_no ?? 0;
-          const key = `${r.activity_order}|${tank}`;
+          // ★Number() 로 못박는다 — 뷰의 activity_order 는 numeric 이라 문자열로 올 수 있고,
+          //  그러면 아래 `v.order === rule.activity_order`(integer)가 전부 false 가 되어
+          //  준비가 조용히 사라진다.
+          const order = Number(r.activity_order);
+          const key = `${order}|${tank}`;
           const cur = byTank.get(key);
           if (!cur || r.planned_start_date < cur.planned) {
-            byTank.set(key, { order: r.activity_order, tank, planned: r.planned_start_date });
+            byTank.set(key, { order, tank, planned: r.planned_start_date });
           }
         }
         for (const rule of (await rRules!.json()) as any[]) {
           if (rule.active === false) continue;
           const tankFilter = Array.isArray(rule.tanks) && rule.tanks.length > 0 ? rule.tanks as number[] : null;
           const rows = [...byTank.values()].filter(v =>
-            v.order === rule.activity_order && (!tankFilter || tankFilter.includes(v.tank)));
+            v.order === Number(rule.activity_order) && (!tankFilter || tankFilter.includes(v.tank)));
           /** @param tanks 탱크별 룰이면 묶인 탱크들, 호선 묶음 룰이면 빈 배열. */
           const push = (tanks: number[], planned: string, trigger: string) => {
             tasks.push({

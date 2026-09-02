@@ -1754,8 +1754,13 @@ export default function App() {
                 {vesselPlan.today.length > 0 && (
                   <div>
                     <div className="text-[11px] font-bold text-blue-700">오늘 공정</div>
+                    {/* 세부 검사(공정관리 뷰의 sub_key 있는 행)는 `└` 로 구분한다.
+                        종류를 코드에 박지 않는다 — 새 종류가 생겨도 여기는 안 고친다. */}
                     {vesselPlan.today.map((it, i) => (
-                      <div key={i} className="text-gray-800">{it.label}</div>
+                      <div key={i} className="flex gap-1 text-gray-800">
+                        {it.detail && <span className="shrink-0 text-gray-400">└</span>}
+                        <span className="min-w-0 flex-1">{it.label}</span>
+                      </div>
                     ))}
                   </div>
                 )}
@@ -1765,6 +1770,7 @@ export default function App() {
                     {vesselPlan.upcoming.map((it, i) => (
                       <div key={i} className="flex gap-1.5 text-gray-800">
                         <span className="shrink-0 font-bold tabular-nums text-teal-700">D-{it.dday}</span>
+                        {it.detail && <span className="shrink-0 text-gray-400">└</span>}
                         <span className="min-w-0 flex-1">
                           {it.label}
                           <span className="text-gray-400"> {it.date ? dateLabel(it.date) : ''}</span>
