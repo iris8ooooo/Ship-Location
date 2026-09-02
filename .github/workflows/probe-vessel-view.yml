@@ -60,6 +60,55 @@ jobs:
             echo '```'
           } | tee -a $GITHUB_STEP_SUMMARY
 
+      - name: 프로덕션을 브라우저로 열어 카드를 실제로 그려 본다
+        run: |
+          set -o pipefail
+          npm i -D playwright@1.49.1 >/dev/null 2>&1
+          npx playwright install --with-deps chromium >/dev/null 2>&1
+          cat > /tmp/render.mjs <<'JS'
+          import { chromium } from 'playwright';
+          const URL = process.env.URL;
+          const b = await chromium.launch();
+          const ctx = await b.newContext({ viewport:{width:390,height:844}, isMobile:true, hasTouch:true });
+          const page = await ctx.newPage();
+          const out = [];
+          for (const hull of ['8206','8263']) {
+            await page.goto(URL, { waitUntil:'domcontentloaded' });
+            let opened = false, txt = '';
+            try {
+              await page.waitForSelector(`#ship-${hull}`, { timeout: 30000 });
+              await page.waitForTimeout(1500);
+              await page.locator(`#ship-${hull}`).click({ force:true });
+              await page.waitForTimeout(6000);
+              txt = await page.locator('body').innerText();
+              opened = true;
+            } catch (e) { out.push(`${hull}: 마커를 못 찾음 (${e.constructor.name})`); continue; }
+            // ★공개 레포다. 공정명·날짜는 찍지 않는다. 개수와 유무만 찍는다.
+            const lines = txt.split('\n').map(l=>l.trim()).filter(Boolean);
+            out.push([
+              `${hull}:`,
+              `카드열림=${opened}`,
+              `└표시=${(txt.match(/└/g)||[]).length}`,
+              `다가오는공정=${txt.includes('다가오는 공정')}`,
+              `오늘공정=${txt.includes('오늘 공정')}`,
+              `할일=${txt.includes('할일')}`,
+              `연결실패=${txt.includes('공정관리 연결 실패')}`,
+              `공정없음=${txt.includes('오늘·임박 공정 없음')}`,
+              `불러오는중=${txt.includes('불러오는 중')}`,
+              `줄수=${lines.length}`,
+            ].join(' '));
+          }
+          console.log(out.join('\n'));
+          await b.close();
+          JS
+          {
+            echo
+            echo '## 프로덕션 실제 렌더 (아이폰14 크기)'
+            echo '```'
+            node /tmp/render.mjs
+            echo '```'
+          } | tee -a $GITHUB_STEP_SUMMARY
+
       - name: 판정
         run: |
           KEY=$(grep -oE "sb_publishable_[A-Za-z0-9_-]+" src/lib/vessel-plan.ts | head -1)
