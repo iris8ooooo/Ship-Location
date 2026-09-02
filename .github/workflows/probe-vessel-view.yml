@@ -88,7 +88,8 @@ jobs:
             out.push([
               `${hull}:`,
               `카드열림=${opened}`,
-              `└표시=${(txt.match(/└/g)||[]).length}`,
+              `세부줄=${(txt.match(/\[\d+ 세부\]/g)||[]).length}`,   // 표기: 3·4탱크 [19 세부] …
+              `옛기호└=${(txt.match(/└/g)||[]).length}`,             // 0 이어야 한다(#84 에서 뺐다)
               `다가오는공정=${txt.includes('다가오는 공정')}`,
               `오늘공정=${txt.includes('오늘 공정')}`,
               `할일=${txt.includes('할일')}`,
@@ -105,7 +106,7 @@ jobs:
             echo
             echo '## 프로덕션 실제 렌더 (아이폰14 크기)'
             echo '```'
-            node "$GITHUB_WORKSPACE/render.mjs"
+            node "$GITHUB_WORKSPACE/render.mjs" | tee /tmp/render.out
             echo '```'
           } | tee -a $GITHUB_STEP_SUMMARY
 
@@ -120,6 +121,9 @@ jobs:
           FAIL=0
           [ "$CODE" = "200" ] || { echo "::error::실서버가 뷰를 안 준다 (http=$CODE). PostgREST 스키마 캐시나 권한 문제다."; FAIL=1; }
           [ "$HITS" -ge 1 ] || { echo "::error::배포된 번들에 vessel_schedule_rows 가 없다. 옛 번들이 서비스되고 있다."; FAIL=1; }
+          RENDERED=$(grep -oE '세부줄=[0-9]+' /tmp/render.out | head -1 | cut -d= -f2)
+          echo "8206 화면에 그려진 세부 줄: ${RENDERED:-?}"
+          [ "${RENDERED:-0}" -ge 1 ] || { echo "::error::실서버는 세부 행을 주는데 **화면에 안 그려진다**. 앱 코드 문제다."; FAIL=1; }
           SUB=$(node -e 'try{const j=JSON.parse(require("fs").readFileSync("/tmp/v.json","utf8"));console.log(Array.isArray(j)?j.filter(r=>r.sub_key!=null).length:0)}catch{console.log(0)}')
           echo "8206 세부행 수: $SUB"
           [ "$SUB" -ge 1 ] || { echo "::error::실서버가 200 을 주지만 **세부 행이 하나도 없다**. 부모만 오는 것이다."; FAIL=1; }
