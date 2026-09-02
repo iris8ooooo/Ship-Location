@@ -1,0 +1,201 @@
+name: Access stats
+
+# 「직원들이 얼마나 자주 앱을 여는가」 를 Cloud Run 요청 로그에서 뽑는다.
+# 앱에는 코드를 한 줄도 안 넣는다 — 이 로그는 이미 자동으로 쌓이고 있다.
+#
+# ★공개 레포다. 액션 로그가 전 세계에 공개된다.
+#  IP · User-Agent 원문 · 전체 URL 은 **절대 찍지 않는다**. 집계 숫자와
+#  쿼리스트링의 **종류 이름**(hull/install/admin)만 찍는다 — 값(호선번호)은 안 찍는다.
+#  (전례: env 를 통째로 찍었다가 Gemini API 키가 공개 로그에 남았다.)
+#
+# ★조용한 오답을 막는 장치 셋 — 이 레포가 네 번 당한 실패 모양이다:
+#  ① 잘림: --limit 에 걸려 잘리면 0건이 아니라서 검사를 통과한다.
+#     받은 건수 == limit 이면 **실패시킨다**. --order=desc 라 잘리는 쪽은 과거다.
+#  ② 0건: 권한 없음 · 로그 꺼짐 · 진짜 0건이 전부 "숫자가 안 나온다" 로 보인다.
+#     gcloud 실패는 set -o pipefail 로 죽고, 0건은 따로 실패시킨다.
+#  ③ 시간대: UTC 로 세고 KST 라 부르면 야간이 통째로 어긋난다. +9h 를 명시적으로 더한다.
+
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: '며칠치를 볼 것인가 (최대 30 — Cloud Logging 기본 보존이 30일)'
+        required: false
+        default: '30'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  SERVICE: hd-ship-location
+  REGION: us-west1
+
+jobs:
+  stats:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 시크릿 확인
+        run: |
+          if [ -z "${{ secrets.GCP_PROJECT_ID }}" ] \
+          || [ -z "${{ secrets.GCP_WIF_PROVIDER }}" ] \
+          || [ -z "${{ secrets.GCP_SERVICE_ACCOUNT }}" ]; then
+            echo "::error::GCP 시크릿이 없다. 건너뛰지 않고 실패시킨다 — 아무 일도 안 하고 초록불이면 거짓말이다."
+            exit 1
+          fi
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: 요청 로그를 받는다
+        env:
+          PROJ: ${{ secrets.GCP_PROJECT_ID }}
+          DAYS: ${{ github.event.inputs.days || '30' }}
+        run: |
+          set -o pipefail
+          LIMIT=200000
+          # ★--order=desc: 잘린다면 잘리는 쪽이 **과거**다. asc 로 두면 최신이 잘려
+          #  "요즘 아무도 안 본다" 라는 정반대 결론이 조용히 나온다.
+          gcloud logging read \
+            "resource.type=\"cloud_run_revision\"
+             AND resource.labels.service_name=\"$SERVICE\"
+             AND logName=\"projects/$PROJ/logs/run.googleapis.com%2Frequests\"" \
+            --project="$PROJ" \
+            --freshness="${DAYS}d" \
+            --order=desc \
+            --limit="$LIMIT" \
+            --format='json(timestamp,httpRequest.requestUrl,httpRequest.status,httpRequest.userAgent)' \
+            > /tmp/logs.json
+          N=$(node -e 'const a=require("/tmp/logs.json");console.log(Array.isArray(a)?a.length:-1)')
+          echo "받은 로그 항목: $N (상한 $LIMIT)"
+          if [ "$N" -lt 0 ]; then
+            echo "::error::로그 응답이 배열이 아니다. 필터나 권한 문제다."; exit 1
+          fi
+          if [ "$N" -eq 0 ]; then
+            echo "::error::로그가 0건이다. 권한이 없거나(roles/logging.viewer), 요청 로그가 꺼져 있거나, 정말로 접속이 없었다. 셋을 구분해야 하므로 실패시킨다."; exit 1
+          fi
+          if [ "$N" -ge "$LIMIT" ]; then
+            echo "::error::상한($LIMIT)에 닿았다 — 과거가 잘렸다. 숫자를 믿으면 안 된다. days 를 줄여서 다시 돌려라."; exit 1
+          fi
+
+      - name: 집계해서 찍는다
+        env:
+          DAYS: ${{ github.event.inputs.days || '30' }}
+        run: |
+          cat > /tmp/agg.mjs <<'JS'
+          import { readFileSync } from 'node:fs';
+          const rows = JSON.parse(readFileSync('/tmp/logs.json', 'utf8'));
+
+          // ── 사람이 앱을 연 것만 남긴다 ────────────────────────────────
+          // nginx 가 SPA 폴백이라 /무엇이든 이 index.html 로 200 을 준다.
+          // 사람은 `/` 로 들어오고 스캐너는 /wp-login.php 같은 데를 때리므로,
+          // **경로가 정확히 `/` 인 것**만 세면 프로빙이 대부분 저절로 빠진다.
+          const BOT = /(bot|crawl|spider|slurp|scan|curl|wget|python|go-http|java\/|okhttp|headless|lighthouse|monitor|uptime|probe)/i;
+          const KST = 9 * 3600 * 1000;
+
+          let total = 0, botDrop = 0, notRoot = 0, notOk = 0;
+          const byDay = new Map(), byHour = new Array(24).fill(0), byDow = new Array(7).fill(0);
+          const byEntry = new Map();          // 유입 경로: 쿼리 **종류만**
+          const daySet = new Set();
+
+          for (const r of rows) {
+            total++;
+            const h = r.httpRequest || {};
+            const ua = h.userAgent || '';
+            if (BOT.test(ua)) { botDrop++; continue; }        // 봇·모니터·헤드리스(우리 프로브 포함)
+            if (String(h.status) !== '200') { notOk++; continue; }
+            let u;
+            try { u = new URL(h.requestUrl); } catch { notRoot++; continue; }
+            if (u.pathname !== '/') { notRoot++; continue; }   // 정적파일·프로빙 제외
+
+            const t = new Date(new Date(r.timestamp).getTime() + KST);  // ★KST 로 옮기고 센다
+            const day = t.toISOString().slice(0, 10);
+            byDay.set(day, (byDay.get(day) || 0) + 1);
+            byHour[t.getUTCHours()]++;            // 이미 +9h 했으므로 getUTC* 가 KST 다
+            byDow[t.getUTCDay()]++;
+            daySet.add(day);
+
+            // ★쿼리는 **키 이름만** 센다. 값(호선번호)은 절대 안 본다.
+            const keys = [...u.searchParams.keys()].sort();
+            const label = keys.length === 0 ? '직접(쿼리 없음)'
+                        : keys.includes('hull')    ? '공정관리비서 딥링크(?hull)'
+                        : keys.includes('install') ? '설치 안내 링크(?install)'
+                        : keys.includes('admin')   ? '관리자 링크(?admin)'
+                        : `기타(${keys.join(',')})`;
+            byEntry.set(label, (byEntry.get(label) || 0) + 1);
+          }
+
+          const opens = [...byDay.values()].reduce((a, b) => a + b, 0);
+          const days = [...byDay.keys()].sort();
+          const bar = (n, max, w = 28) => '█'.repeat(Math.max(n > 0 ? 1 : 0, Math.round(n / (max || 1) * w)));
+          const DOW = ['일', '월', '화', '수', '목', '금', '토'];
+          const out = [];
+
+          out.push(`## 십로케이션 접속 실적 — 최근 ${process.env.DAYS}일 (KST 기준)`);
+          out.push('');
+          out.push(`- **앱을 연 횟수: ${opens.toLocaleString()}회**`);
+          out.push(`- 기록이 있는 날: ${days.length}일  ·  하루 평균 **${(opens / Math.max(1, days.length)).toFixed(1)}회**`);
+          out.push(`- 가장 많았던 날: ${days.length ? (() => { const [d, n] = [...byDay.entries()].sort((a, b) => b[1] - a[1])[0]; return `${d} (${n}회)`; })() : '-'}`);
+          out.push('');
+          out.push(`<sub>전체 요청 ${total.toLocaleString()}건 중 — 봇·자동화 ${botDrop.toLocaleString()}건, 정적파일·프로빙 ${notRoot.toLocaleString()}건, 200 아닌 것 ${notOk.toLocaleString()}건을 뺀 값이다.</sub>`);
+          out.push('');
+
+          out.push('### 날짜별');
+          out.push('```');
+          const dmax = Math.max(...byDay.values(), 1);
+          for (const d of days) {
+            const n = byDay.get(d);
+            const wd = DOW[new Date(d + 'T00:00:00Z').getUTCDay()];
+            out.push(`${d}(${wd})  ${String(n).padStart(4)}  ${bar(n, dmax)}`);
+          }
+          out.push('```');
+          out.push('');
+
+          out.push('### 시간대별 (0~23시, KST)');
+          out.push('```');
+          const hmax = Math.max(...byHour, 1);
+          for (let h = 0; h < 24; h++) {
+            out.push(`${String(h).padStart(2, '0')}시  ${String(byHour[h]).padStart(4)}  ${bar(byHour[h], hmax)}`);
+          }
+          out.push('```');
+          out.push('');
+
+          out.push('### 요일별');
+          out.push('```');
+          const wmax = Math.max(...byDow, 1);
+          for (let i = 0; i < 7; i++) {
+            out.push(`${DOW[i]}요일  ${String(byDow[i]).padStart(4)}  ${bar(byDow[i], wmax)}`);
+          }
+          out.push('```');
+          out.push('');
+
+          out.push('### 어디로 들어왔나');
+          out.push('```');
+          for (const [k, v] of [...byEntry.entries()].sort((a, b) => b[1] - a[1])) {
+            out.push(`${String(v).padStart(5)}회  ${k}`);
+          }
+          out.push('```');
+          out.push('');
+          out.push('> **이 숫자가 말하지 않는 것** — 누가 봤는지는 알 수 없다(요청 로그에 사람을 가리키는 값이 없고, 사내망이면 여러 사람이 같은 IP 로 나온다). 홈화면 앱을 완전히 끄지 않고 되돌아오면 요청이 안 가므로 **실제보다 적게** 잡히고, 새로고침은 여러 번 세어진다. 절대값이 아니라 **추세**로 읽어야 한다.');
+
+          const text = out.join('\n');
+          console.log(text);
+          if (process.env.GITHUB_STEP_SUMMARY) {
+            const { appendFileSync } = await import('node:fs');
+            appendFileSync(process.env.GITHUB_STEP_SUMMARY, text + '\n');
+          }
+          if (opens === 0) {
+            console.log('::error::로그는 받았는데 사람이 연 것으로 셀 수 있는 요청이 0건이다. 필터가 과하게 거르고 있을 수 있다.');
+            process.exit(1);
+          }
+          JS
+          node /tmp/agg.mjs
