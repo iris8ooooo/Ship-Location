@@ -62,13 +62,19 @@ jobs:
           DAYS: ${{ github.event.inputs.days || '30' }}
         run: |
           set -o pipefail
-          LIMIT=200000
+          LIMIT=50000
+          # ★거르는 일은 **서버에서** 한다. 한 번 열 때 index.html·js·css·아이콘·manifest 로
+          #  요청이 예닐곱 건씩 나가는데, 그걸 다 받아 와서 클라이언트에서 버리면
+          #  페이지네이션만 수만 번 돈다(첫 시도가 17분 넘게 안 끝나서 취소했다).
+          #  경로가 정확히 `/` 인 것(쿼리는 있어도 됨)만 서버에서 골라 받는다.
           # ★--order=desc: 잘린다면 잘리는 쪽이 **과거**다. asc 로 두면 최신이 잘려
           #  "요즘 아무도 안 본다" 라는 정반대 결론이 조용히 나온다.
           gcloud logging read \
             "resource.type=\"cloud_run_revision\"
              AND resource.labels.service_name=\"$SERVICE\"
-             AND logName=\"projects/$PROJ/logs/run.googleapis.com%2Frequests\"" \
+             AND logName=\"projects/$PROJ/logs/run.googleapis.com%2Frequests\"
+             AND httpRequest.status=200
+             AND httpRequest.requestUrl=~\"^https?://[^/]+/(\\?|$)\"" \
             --project="$PROJ" \
             --freshness="${DAYS}d" \
             --order=desc \
@@ -76,7 +82,7 @@ jobs:
             --format='json(timestamp,httpRequest.requestUrl,httpRequest.status,httpRequest.userAgent)' \
             > /tmp/logs.json
           N=$(node -e 'const a=require("/tmp/logs.json");console.log(Array.isArray(a)?a.length:-1)')
-          echo "받은 로그 항목: $N (상한 $LIMIT)"
+          echo "받은 로그 항목(경로 / · 200 만): $N (상한 $LIMIT)"
           if [ "$N" -lt 0 ]; then
             echo "::error::로그 응답이 배열이 아니다. 필터나 권한 문제다."; exit 1
           fi
