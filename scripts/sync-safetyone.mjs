@@ -209,29 +209,40 @@ for (const item of [...plan.moves, ...plan.creates]) {
   }).catch(() => {});   // 기록은 최선노력 — 위치 반영이 먼저다
 }
 
-// ── 제자리 배의 선석 이름 채우기 ────────────────────────────────────────
-// 자리는 안 건드린다. **글자만** 맞춘다.
+// ── 제자리 배: 확인 시각을 찍고, 선석 이름도 맞춘다 ──────────────────────
+// 자리는 안 건드린다. `syncedAt` 과 (달라졌으면) `berth` 만 쓴다.
+//
+// ★`syncedAt` 은 「위치가 **바뀐** 시각」이 아니라 「마지막으로 **확인한** 시각」이다
+//  (2026-09-05 사용자 지시). 칩 글귀를 「위치 갱신」이 아니라 「위치 확인」으로 정한 것과
+//  같은 이유다 — 배가 안 움직여도 우리는 매 수집마다 그 자리에 있음을 확인한다.
+//  옮기는 배에만 찍던 탓에, 6시간마다 확인하고도 공정관리비서에 「(8/30 기준)」이 붙어
+//  **멀쩡히 확인된 위치가 오래된 것처럼** 보였다(실측: 23척 중 대부분이 5~6일째로 표시).
+//  「언제 옮겼나」는 이 값이 아니라 `history` 이동 기록에 있다.
+//
 // ★이게 없으면 한 번도 옮긴 적 없는 배는 `berth` 키가 영영 안 생긴다 — 실제로
 //  8292·8300·8209 가 그랬다(x·y·color 만 있어서 공정관리비서에 "위치 미확인" 으로 떴다).
-//  수집은 옮기는 배에만 쓰고 있었기 때문이다.
-// ★값이 같으면 쓰지 않는다. 빈 갱신으로 이력을 더럽히지 않는다.
-// ★`syncedAt` 도 안 건드린다 — 이건 위치 갱신이 아니라 이름 보정이다.
-// ★이력(history)에도 안 남긴다 — 배가 움직이지 않았으므로 "이동" 이 아니다.
-let named = 0;
+// ★이력(history)에는 안 남긴다 — 배가 움직이지 않았으므로 "이동" 이 아니다.
+//  CLAUDE.md 의 "값이 안 바뀌었으면 쓰지 않는다" 는 **이력을 더럽히지 말라**는 뜻이고,
+//  그건 여기서 지켜진다. 문서 쓰기 자체는 하루 20척 x 4회 = 80건으로 무료 한도의 0.4% 다.
+// ★**리스트에 있는 배만** 확인으로 친다. 리스트 밖(untouched)·시운전(sea)은 손대지 않는다 —
+//  안 본 배에 "확인했다" 를 찍으면 그게 바로 조용한 오답이다.
+let named = 0, seen = 0;
 for (const sk of plan.skips) {
   const cur = live.get(sk.hull);
   if (!cur) continue;
   const want = berthLabelAt(sk.berth, cur);
-  if (!want || cur.berth === want) continue;
+  const patch = { syncedAt: now };
+  const rename = want && cur.berth !== want;
+  if (rename) patch.berth = want;
   try {
-    await updateDoc(doc(db, 'ships', sk.hull), { berth: want });
-    console.log(`이름  ${sk.hull}  ${cur.berth ?? '(없음)'} → ${want}`);
-    named++;
+    await updateDoc(doc(db, 'ships', sk.hull), patch);
+    seen++;
+    if (rename) { console.log(`이름  ${sk.hull}  ${cur.berth ?? '(없음)'} → ${want}`); named++; }
   } catch (e) {
-    console.log(`⚠ 이름 못 씀 ${sk.hull}: ${e?.code ?? e}`);
+    console.log(`⚠ 제자리 확인 못 씀 ${sk.hull}: ${e?.code ?? e}`);
   }
 }
-if (named) console.log(`선석 이름 보정 ${named}건 (자리는 안 건드림)`);
+console.log(`제자리 확인 ${seen}건 (자리는 안 건드림)${named ? ` · 그중 선석 이름 보정 ${named}건` : ''}`);
 
 // 수집 심장박동. 아무것도 안 바뀐 수집도 여기엔 남아야
 // "3시간째 그대로" 와 "수집이 죽음" 이 구분된다.
