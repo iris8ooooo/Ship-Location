@@ -17,7 +17,7 @@
 import { readFileSync } from 'node:fs';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, connectFirestoreEmulator, collection, getDocs, doc, setDoc, updateDoc, addDoc } from 'firebase/firestore';
-import { parseListText, planMoves, BERTH_LABEL } from '../src/lib/safetyone-match.mjs';
+import { parseListText, planMoves, BERTH_LABEL, berthLabelAt } from '../src/lib/safetyone-match.mjs';
 import { residualMedian, namedRowsFromCoords, MAX_RESIDUAL, tmToYard } from '../src/lib/yard-transform.mjs';
 import { bowByHull, unpackMask, diagnose, bowFromHeading } from '../src/lib/bow-detect.mjs';
 
@@ -190,7 +190,9 @@ if (dry) { console.log('\n[미리보기] 아무것도 쓰지 않았다.'); proce
 for (const item of [...plan.moves, ...plan.creates]) {
   const cur = live.get(item.hull);
   const pos = { x: item.to.x, y: item.to.y, r: item.to.r };
-  const extra = { berth: BERTH_LABEL[item.berth], loc: item.loc, syncedAt: now };
+  // ★berth 는 세부 선석까지(`1안벽 A선석`). 공정관리비서가 이 문자열을 그대로 찍는다.
+  //  loc 은 안벽 단위로 그대로 둔다 — 다른 화면이 쓰고 있을 수 있다(2026-09-04 사용자 지시).
+  const extra = { berth: berthLabelAt(item.berth, pos), loc: item.loc, syncedAt: now };
   // berth·loc·syncedAt 는 공정관리비서 연동용. 룰이 추가 필드를 막으면 좌표만 폴백.
   // 기존 배는 부분 갱신 — 통째로 갈아끼우면 좌표 밖 필드까지 건드린다.
   if (cur) {
@@ -206,6 +208,30 @@ for (const item of [...plan.moves, ...plan.creates]) {
     shipId: item.hull, author: '자동수집', timestamp: now,
   }).catch(() => {});   // 기록은 최선노력 — 위치 반영이 먼저다
 }
+
+// ── 제자리 배의 선석 이름 채우기 ────────────────────────────────────────
+// 자리는 안 건드린다. **글자만** 맞춘다.
+// ★이게 없으면 한 번도 옮긴 적 없는 배는 `berth` 키가 영영 안 생긴다 — 실제로
+//  8292·8300·8209 가 그랬다(x·y·color 만 있어서 공정관리비서에 "위치 미확인" 으로 떴다).
+//  수집은 옮기는 배에만 쓰고 있었기 때문이다.
+// ★값이 같으면 쓰지 않는다. 빈 갱신으로 이력을 더럽히지 않는다.
+// ★`syncedAt` 도 안 건드린다 — 이건 위치 갱신이 아니라 이름 보정이다.
+// ★이력(history)에도 안 남긴다 — 배가 움직이지 않았으므로 "이동" 이 아니다.
+let named = 0;
+for (const sk of plan.skips) {
+  const cur = live.get(sk.hull);
+  if (!cur) continue;
+  const want = berthLabelAt(sk.berth, cur);
+  if (!want || cur.berth === want) continue;
+  try {
+    await updateDoc(doc(db, 'ships', sk.hull), { berth: want });
+    console.log(`이름  ${sk.hull}  ${cur.berth ?? '(없음)'} → ${want}`);
+    named++;
+  } catch (e) {
+    console.log(`⚠ 이름 못 씀 ${sk.hull}: ${e?.code ?? e}`);
+  }
+}
+if (named) console.log(`선석 이름 보정 ${named}건 (자리는 안 건드림)`);
 
 // 수집 심장박동. 아무것도 안 바뀐 수집도 여기엔 남아야
 // "3시간째 그대로" 와 "수집이 죽음" 이 구분된다.

@@ -41,6 +41,48 @@ export const BERTH_LABEL = {
   waiting: '대기',
 };
 
+/**
+ * 안벽 안에서 A(동)·B(서) 선석을 가르는 x. **슬롯 표에서 뽑는다** — 숫자를 따로
+ * 박아 두면 슬롯을 늘릴 때 한쪽만 고치게 된다(이 프로젝트가 반복해서 당한 모양).
+ *
+ * ★세이프티원은 선석 이름을 주지 않는다. 배 레이어에 그 필드가 아예 없고 좌표만 있다
+ *  (2026-08-29 확정). 그래서 A/B 는 **좌표로 역산**할 수밖에 없다.
+ * ★**A 가 동쪽(오른쪽)**이고, 돌핀이 자기 안벽의 두 선석 사이에 정확히 끼어 있다.
+ *  그래서 슬롯 x 를 늘어놓으면 가운데가 크게 비고, 그 빈 곳 한가운데가 경계다.
+ * ★실측 여유(2026-09-04 프로덕션 21척): 2안벽 85px · 1안벽 111px.
+ *  좌표계 최대 오차가 23.4px 이므로 네 배 이상 여유가 있다 — 도크(실효 경계 27px)와
+ *  달리 여기서는 오차가 선석을 뒤집지 못한다.
+ */
+function quaySplit(id) {
+  const xs = [...new Set(BERTH_SLOTS[id].map(s => s.x))].sort((a, b) => a - b);
+  let at = 1, gap = -1;
+  for (let i = 1; i < xs.length; i++) {
+    if (xs[i] - xs[i - 1] > gap) { gap = xs[i] - xs[i - 1]; at = i; }
+  }
+  return { cut: (xs[at - 1] + xs[at]) / 2, gap };
+}
+const QUAY_SPLIT = { quay1: quaySplit('quay1'), quay2: quaySplit('quay2') };
+
+/** 진단·테스트용. 경계가 어디로 잡혔는지 눈으로 확인할 수 있어야 한다. */
+export function quaySplits() {
+  return Object.fromEntries(Object.entries(QUAY_SPLIT).map(([k, v]) => [k, { ...v }]));
+}
+
+/**
+ * 그 자리에 있는 배의 **표기용 선석 이름** — `1안벽 A선석` 처럼.
+ * 안벽이 아니면 예전 그대로(`2도크`·`1BERTH`·`플로팅` …).
+ *
+ * ★선석 id(`quay1`)는 **바꾸지 않는다.** "선석이 같으면 안 옮긴다" 판정이 그 id 로
+ *  돌아가므로, id 를 쪼개면 A↔B 로 넘어갈 때마다 배를 옮기게 된다. 여기서 바뀌는 것은
+ *  **화면에 찍는 글자 하나**뿐이다.
+ */
+export function berthLabelAt(id, pos) {
+  const label = BERTH_LABEL[id] ?? '';
+  const split = QUAY_SPLIT[id];
+  if (!split || !pos || !Number.isFinite(Number(pos.x))) return label;
+  return `${label} ${Number(pos.x) >= split.cut ? 'A' : 'B'}선석`;
+}
+
 /** 위치 문자열 → 선석 id. 첫 구간에서 아는 이름을 찾는다. 모르면 null. */
 export function berthFromLoc(loc) {
   const s = String(loc ?? '').replace(/\s+/g, '').toUpperCase();
