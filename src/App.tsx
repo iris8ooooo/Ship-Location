@@ -1400,6 +1400,7 @@ export default function App() {
           wind={windData}
           rot={rot}
           onOpen={() => setOpenPanel(p => (p === 'info' ? null : 'info'))}
+          variant={(localStorage.getItem('seaVariant') as 'light' | 'dark' | 'mini' | null) ?? 'light'}
         />
       </div>
 
