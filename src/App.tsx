@@ -61,7 +61,9 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
   console.error('Firestore Error: ', JSON.stringify(errInfo));
   throw new Error(JSON.stringify(errInfo));
 }
-import { RotateCcw, RotateCw, X, MessageSquare, Plus, Waves, Info, ChevronUp, ChevronDown, Droplets, ArrowUpCircle, ArrowDownCircle, Lock, Unlock, ArrowLeftRight } from 'lucide-react';
+import { RotateCcw, RotateCw, X, MessageSquare, Plus, Waves, Info, ChevronUp, ChevronDown, Droplets, ArrowUpCircle, ArrowDownCircle, Lock, Unlock, ArrowLeftRight, BarChart3 } from 'lucide-react';
+import VisitsPanel from './components/VisitsPanel';
+import { recordVisit, setVisitorName, nameAsked, NAME_MAX } from './lib/visits';
 
 interface ShipData {
   x: number;
@@ -192,7 +194,10 @@ export default function App() {
   // 세로 공간이 좁은 화면(폰 가로 등)에서는 패널이 지도를 통째로 덮으므로
   // 처음부터 접어둔다. 넉넉한 화면에서는 펼친 채로 시작한다.
   // 패널은 한 번에 하나만 연다. 기본은 닫힘 — 지도가 주인공이다.
-  const [openPanel, setOpenPanel] = useState<null | 'info' | 'add'>(null);
+  const [openPanel, setOpenPanel] = useState<null | 'info' | 'add' | 'visits'>(null);
+  /** 뷰어에게 이름을 한 번 물어보는 카드. ★앱을 막지 않는다 — 지도가 먼저다. */
+  const [askName, setAskName] = useState(false);
+  const [nameInput, setNameInput] = useState('');
   const [bannerOpen, setBannerOpen] = useState(false);
   const [infoTab, setInfoTab] = useState<'tide' | 'wind'>('tide');
   const [windData, setWindData] = useState<{speed: number, direction: string, degrees: number, time: string, hourly: { speeds: number[] }} | null>(null);
@@ -543,6 +548,17 @@ export default function App() {
       setUser(currentUser);
     });
     return () => unsubscribe();
+  }, []);
+
+  // 접속 집계 — 하루에 한 번만 남긴다. 실패해도 조용히 넘어간다(지도가 먼저다).
+  // ★이름을 아직 한 번도 안 물어봤으면 물어보는 카드를 띄운다. **앱을 막지 않는다** —
+  //  뷰어로 볼 사람에게 이름부터 묻는 화면은 이미 한 번 걷어낸 적이 있다(2026-08-30).
+  useEffect(() => {
+    recordVisit();
+    if (!nameAsked()) {
+      const t = setTimeout(() => setAskName(true), 1500);   // 지도가 먼저 뜨고 나서
+      return () => clearTimeout(t);
+    }
   }, []);
 
   useEffect(() => {
@@ -1481,6 +1497,15 @@ export default function App() {
           md:left-auto md:right-20 md:top-24 md:bottom-auto! md:w-[340px]
           ${openPanel ? 'opacity-100 translate-y-0' : 'pointer-events-none opacity-0 translate-y-4'}`}
       >
+      {/* 접속 집계. ★버튼을 관리자에게만 보이는 것은 예의일 뿐 보안이 아니다 —
+          실제로 막는 것은 파이어스토어 규칙(`isOwner()`)이고, 남이 이 화면을 열어도
+          `permission-denied` 만 본다. */}
+      {openPanel === 'visits' && (
+        <div className="bg-white/95 backdrop-blur rounded-2xl shadow-xl border border-gray-200 px-4 py-3">
+          <VisitsPanel onClose={() => setOpenPanel(null)} />
+        </div>
+      )}
+
       {/* Info Panel (Tide / Wind) */}
       {openPanel === 'info' && (
       <div className="bg-white/95 backdrop-blur p-3 rounded-2xl shadow-xl flex flex-col gap-1.5 w-auto">
@@ -1683,7 +1708,54 @@ export default function App() {
             <Plus size={28} />
           </button>
         )}
+        {appMode === 'admin' && (
+          <button
+            onClick={() => setOpenPanel(p => p === 'visits' ? null : 'visits')}
+            aria-label="접속 집계"
+            className={`w-14 h-14 shadow-xl rounded-full flex items-center justify-center border transition-all active:scale-95 ${openPanel === 'visits' ? 'bg-blue-600 text-white border-blue-700' : 'bg-white/95 backdrop-blur text-blue-600 border-gray-200'}`}
+          >
+            <BarChart3 size={26} />
+          </button>
+        )}
       </div>
+
+      {/* 이름 한 번 묻기. ★**앱을 막지 않는다** — 지도 위에 뜨는 작은 카드이고
+          「나중에」로 그냥 닫힌다. 뷰어로 볼 사람에게 이름부터 묻는 전체 화면은
+          2026-08-30 에 한 번 걷어냈다. 같은 실수를 여기서 반복하지 않는다.
+          ★이름에는 **아무 권한도 붙지 않는다.** 사칭해서 얻는 게 0이면 사칭할 이유도 0이다. */}
+      {askName && (
+        <div className="fixed left-2 right-2 top-3 z-[60] mx-auto max-w-sm rounded-2xl bg-white/97 backdrop-blur shadow-xl border border-gray-200 px-4 py-3">
+          <p className="text-[13px] text-gray-700 leading-relaxed">
+            누가 보고 있는지 알 수 있게 <b>성함</b>을 한 번만 남겨 주십시오.
+            <span className="text-gray-500"> 안 적으셔도 앱은 그대로 쓰실 수 있습니다.</span>
+          </p>
+          <div className="mt-2 flex gap-2">
+            <input
+              type="text"
+              value={nameInput}
+              onChange={e => setNameInput(e.target.value.slice(0, NAME_MAX))}
+              placeholder="예: 홍길동"
+              className="min-w-0 flex-1 border-2 border-gray-300 px-3 py-2 rounded-lg text-[15px] text-gray-800 focus:border-blue-500 focus:outline-none"
+              onKeyDown={e => {
+                if (e.key === 'Enter' && nameInput.trim()) { setVisitorName(nameInput); setAskName(false); }
+              }}
+            />
+            <button
+              onClick={() => { if (nameInput.trim()) { setVisitorName(nameInput); setAskName(false); } }}
+              className="shrink-0 bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 rounded-lg"
+            >
+              저장
+            </button>
+          </div>
+          {/* ★「나중에」도 기록한다. 안 그러면 열 때마다 다시 물어 성가시다. */}
+          <button
+            onClick={() => { setVisitorName(''); setAskName(false); }}
+            className="mt-1 w-full py-1.5 text-gray-500 font-bold text-[12px]"
+          >
+            나중에
+          </button>
+        </div>
+      )}
 
       {/* 지역 바로가기. 누르면 그 구역으로 부드럽게 확대 이동한다.
           2단으로 쌓아 가로 폭을 줄이고, 최근 업데이트 바에 바짝 붙인다. */}

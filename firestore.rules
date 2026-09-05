@@ -35,6 +35,23 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    /**
+     * 이 앱의 주인. **접속기록을 읽을 수 있는 유일한 사람**이다.
+     *
+     * ★uid 가 아니라 **확인된 이메일**로 가른다. uid 는 사람이 한 번 로그인해야
+     *  생기는 값이라 왕복이 필요하고, 저장소를 지우면 바뀔 위험을 따져야 한다.
+     *  이메일은 구글이 보증하고 영구적이다.
+     * ★`email_verified` 를 반드시 같이 본다. 이걸 빼면 이메일만 같게 만든 다른
+     *  공급자 계정으로 통과할 수 있다.
+     * ★이 주소는 이 레포의 **커밋 작성자로 이미 공개돼 있다**(git log). 규칙에 적어도
+     *  새로 새는 정보가 없다. 그리고 이메일은 비밀번호가 아니다 — 알아도 못 들어온다.
+     */
+    function isOwner() {
+      return request.auth != null &&
+             request.auth.token.email_verified == true &&
+             request.auth.token.email == 'iris8ooooo@gmail.com';
+    }
+
     function isValidShip(data) {
       return data.keys().hasAll(['x', 'y', 'r', 'color']) &&
              data.x is number &&
@@ -82,6 +99,35 @@ service cloud.firestore {
 
     // 3중점검 수집 심장박동 하나만 산다. 앱이 "마지막 수집이 언제였나" 를
     // 보여주는 용도라, 문서 id 를 safetyone 으로 고정해 잡동사니가 못 늘게 한다.
+    // ── 접속 집계 (2026-09-05) ─────────────────────────────────────
+    // 누가 얼마나 자주 앱을 여는지. **읽기는 오너 한 사람만** — 이 앱은 공개 주소라
+    // 읽기를 안 막으면 접속기록이 전 세계 공개가 된다.
+    //
+    // ★쓰기에 인증을 요구하지 않는다. 익명 인증을 켜려면 파이어베이스 콘솔을
+    //  사람이 한 번 눌러야 하고, 그 한 클릭 때문에 기능 전체가 멈춘다.
+    //  대신 기기 id 를 브라우저가 만들어 보낸다 — **위조 가능**하다는 뜻이고,
+    //  그건 "접속 수를 부풀릴 수 있다" 까지다(남의 기록을 읽거나 지우지는 못한다).
+    //  사내 도구에서 그 위험은 감수할 만하다. 정확한 사람 수가 필요해지면
+    //  그때 익명 인증으로 올린다.
+    //
+    // ★`hasOnly` 로 필드를 봉인한다. 앱이 나중에 실수로든 편의로든 IP·User-Agent·
+    //  전체 URL 을 한 줄 붙이면 **쓰기가 거부된다** — "안 모으기로 했다" 는 약속이
+    //  지킬 사람 없이도 성립하게 만드는 장치다.
+    // ★시각은 `request.time` 으로 **서버가 찍는다.** 클라이언트 시계를 믿으면
+    //  날짜별 집계가 조용히 어긋난다.
+    // ★수정·삭제는 아무도 못 한다. 오너도 못 지운다 — 기록은 기록이어야 한다.
+    match /visits/{visitId} {
+      allow read: if isOwner();
+      allow create: if request.resource.data.keys().hasOnly(['device', 'name', 'at']) &&
+                       request.resource.data.device is string &&
+                       request.resource.data.device.size() >= 8 &&
+                       request.resource.data.device.size() <= 40 &&
+                       request.resource.data.name is string &&
+                       request.resource.data.name.size() <= 20 &&
+                       request.resource.data.at == request.time;
+      allow update, delete: if false;
+    }
+
     match /meta/safetyone {
       allow read: if true;
       allow write: if request.resource.data.keys().hasAll(['lastSuccess']) &&
