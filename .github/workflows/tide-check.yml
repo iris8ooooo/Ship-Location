@@ -168,6 +168,8 @@ jobs:
   prod:
     if: github.event_name == 'workflow_dispatch' && inputs.prod
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -222,18 +224,25 @@ jobs:
             cat out/prod.log
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-      # ★아티팩트를 **못 받는 세션**이 있다. 개발 샌드박스는 프록시가 blob 저장소를 막아,
+      # ★아티팩트를 **못 받는 세션**이 있다. 개발 샌드박스는 프록시가 blob 저장소를 막아
       #  스크린샷을 올려 둬도 열어 볼 수가 없다 — 볼 수 없는 스크린샷은 그 세션에 없는 것과 같다.
-      #  그래서 로그로도 내보낸다. 옵트인인 이유: 켜면 로그가 수십 KB 늘어난다.
-      - name: 화면을 로그에 base64 로도 (b64 입력)
+      #  `raw.githubusercontent.com` 은 닿으므로 **전용 브랜치 하나에 덮어써서** 그리로 내준다.
+      #  ★히스토리를 쌓지 않는다(고아 커밋 + force). 이 브랜치는 언제 지워도 되는 임시물이고
+      #   main 에는 영영 들어가지 않는다.
+      - name: 화면을 prod-shots 브랜치로 (b64 입력)
         if: inputs.b64
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          for f in out/prod/*.jpg; do
-            [ -f "$f" ] || continue
-            echo "B64FILE $(basename "$f") $(wc -c < "$f")bytes"
-            base64 -w 3800 "$f"
-            echo "B64END"
-          done
+          cd out/prod
+          git init -q .
+          git checkout -q --orphan prod-shots
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A ./*.jpg
+          git -c commit.gpgsign=false commit -qm "프로덕션 화면 ${{ github.run_number }} (임시 — 개발 세션이 보려고)"
+          git push -q -f "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" prod-shots
+          echo "→ https://raw.githubusercontent.com/${{ github.repository }}/prod-shots/03-tide.jpg"
 
       - uses: actions/upload-artifact@v4
         if: always()
