@@ -187,9 +187,15 @@ jobs:
           await page.goto(URL, { waitUntil: 'domcontentloaded' });
           await page.waitForTimeout(6000);                 // 파이어스토어 스냅샷을 기다린다
           await page.screenshot({ path: 'out/prod/01-map.png' });
-          await page.getByLabel('조석·바람').click({ timeout: 30000 });
+          // ★`exact: true` 가 필요하다. 새 칩의 라벨이 「조석·바람 **자세히 보기**」라
+          //  느슨하게 잡으면 FAB 과 칩 **둘 다** 걸려 strict mode 로 죽는다(run 11 에서 실제로).
+          await page.getByLabel('조석·바람', { exact: true }).click({ timeout: 30000 });
           await page.waitForTimeout(3000);
           await page.screenshot({ path: 'out/prod/02-open.png' });
+          // 조석 탭을 확실히 고른 뒤 한 장 더 — 기본 탭이 무엇이든 조석을 본다
+          await page.getByRole('button', { name: '조석', exact: true }).click({ timeout: 10000 }).catch(() => {});
+          await page.waitForTimeout(1500);
+          await page.screenshot({ path: 'out/prod/03-tide.png' });
           // 시트든 옛 패널이든 열린 것을 글자로 읽는다 — 배포 전후 어느 쪽이어도 뭔가 남는다
           const sheet = page.locator('[data-sea-sheet]');
           const txt = await (await sheet.count()
