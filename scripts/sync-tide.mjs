@@ -15,7 +15,7 @@ import { readFileSync } from 'node:fs';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, connectFirestoreEmulator, doc, setDoc } from 'firebase/firestore';
 import {
-  TIDE_STATION, TIDE_DAYS, TIDE_DOC, khoaTideUrl, kstDateKey, addDays, parseKhoaHighLow, buildTideDoc,
+  TIDE_STATION, TIDE_DAYS, TIDE_DOC, khoaTideUrl, serviceKeyShape, kstDateKey, addDays, parseKhoaHighLow, buildTideDoc,
 } from '../src/lib/tide.mjs';
 
 const dry = process.argv.includes('--dry');
@@ -23,6 +23,16 @@ const key = process.env.KHOA_SERVICE_KEY;
 if (!key) {
   console.error('KHOA_SERVICE_KEY 가 없다. 공공데이터포털(data.go.kr) 「조석예보(고, 저조)」 활용신청 후 받은 인증키(Decoding)를 넣을 것.');
   process.exit(2);
+}
+
+/** 오류를 사람이 읽을 한 줄로. 값·원문은 담지 않는다(공개 레포). */
+function describe(e) {
+  const msg = e?.message ?? String(e);
+  const c = e?.cause;
+  if (!c) return msg;
+  const code = c.code ?? c.errno ?? c.name;
+  const inner = c.cause?.code ?? c.cause?.message;
+  return `${msg} (${[code, inner].filter(Boolean).join(' ← ')})`;
 }
 
 const now = Date.now();
@@ -43,13 +53,27 @@ for (let i = 0; i < TIDE_DAYS; i++) {
     days.push(d);
     console.log(`  ${date}  ${d.tides.map(t => `${t.type === 'High' ? '만' : '간'}${t.time} ${t.height}cm`).join(' · ')}`);
   } catch (e) {
-    failures.push(`${date}: ${e?.message ?? e}`);
-    console.log(`  ${date}  ✗ ${e?.message ?? e}`);
+    // ★`fetch failed` 는 undici 가 **원인을 감싸 숨긴 것**이다 — 그것만 찍으면
+    //  DNS 인지 TCP 타임아웃인지 인증서인지 알 수 없다(2026-09-05 실제로 그렇게 막혔다).
+    //  `cause` 를 같이 남긴다. 여기에는 키도 응답 원문도 들어가지 않는다.
+    const why = describe(e);
+    failures.push(`${date}: ${why}`);
+    console.log(`  ${date}  ✗ ${why}`);
   }
 }
 
 if (failures.length) {
   console.error(`\n${failures.length}/${TIDE_DAYS}일치 실패 — 아무것도 쓰지 않는다. 옛 문서가 그대로 남아 앱은 마지막 수신 시각을 보여준다.`);
+  // ★못 받았다는 기록에는 **왜 못 받았는지**가 같이 있어야 한다. 키는 값이 아니라 모양만 찍는다(공개 레포).
+  console.error(`인증키 모양: ${serviceKeyShape(key)}`);
+  if (failures.some(f => f.includes('오류 30') || f.includes('오류 31'))) {
+    console.error(
+      '게이트웨이 코드 30/31 은 키가 이 서비스에 **등록돼 있지 않다**는 뜻이다. 남은 원인은 둘:\n' +
+      '  ① 활용신청이 아직 승인/반영되지 않았다 — data.go.kr → 마이페이지 → 오픈API → 개발계정 에서\n' +
+      '     「해양수산부 국립해양조사원_조석예보(고, 저조)」(15156018)가 **승인** 상태인지 본다(반영에 최대 1시간).\n' +
+      '  ② 다른 서비스의 키를 넣었다 — 그 신청 상세의 **일반 인증키**를 그대로 다시 넣는다.\n' +
+      '  (Encoding/Decoding 어느 쪽을 넣어도 되게 코드가 맞춰 준다 — 이제 그건 원인이 아니다.)');
+  }
   process.exit(1);
 }
 

@@ -69,8 +69,42 @@ export function addDays(dateKey, n) {
   return kstDateKey(Date.UTC(y, m - 1, d + n) - KST_OFFSET_MS);
 }
 
+/**
+ * 공공데이터포털 인증키를 **URL 에 얹기 전 모양**으로 맞춘다.
+ *
+ * ★data.go.kr 은 키를 **두 벌** 준다: `Decoding`(원본 — base64 라 `+ / =` 가 들어 있다)과
+ *  `Encoding`(그걸 퍼센트 인코딩한 것 — `%2B %2F %3D`). 아래 `URLSearchParams` 가 값을
+ *  **한 번 더** 인코딩하므로, Encoding 키를 넣으면 `%` 가 `%25` 가 되어 **이중 인코딩**된다.
+ *  게이트웨이는 그걸 「코드 30 SERVICE_KEY_IS_NOT_REGISTERED(등록되지 않은 서비스키)」로
+ *  돌려준다 — **키는 멀쩡한데 등록이 안 된 것처럼 보인다.**
+ *  (2026-09-05 첫 실행이 정확히 이렇게 4/4일 죽었다.)
+ *
+ * ★가르는 법: base64 알파벳(A–Z a–z 0–9 + / =)에는 **`%` 가 없다.** 그러니 `%` 가 있으면
+ *  Encoding 키다 → 한 번 되돌린다. Decoding 키는 그대로 통과한다(바뀌는 것이 없다).
+ * ★왜 코드가 받아 주나 — 시크릿은 **사람만** 고칠 수 있다. 어느 쪽을 붙여 넣었는지로
+ *  수집이 죽는 것은 사람 손을 한 번 더 부르는 일이라, 기계가 흡수할 수 있으면 흡수한다.
+ * @param {string} key
+ */
+export function normalizeServiceKey(key) {
+  if (typeof key !== 'string') return key;
+  const k = key.trim();
+  if (!k.includes('%')) return k;
+  try { return decodeURIComponent(k); } catch { return k; }   // `%` 가 있어도 인코딩이 아니면 그대로
+}
+
+/** 인증키가 어떤 모양이었는지 — **값은 절대 찍지 않는다**(공개 레포). 실패 진단용. */
+export function serviceKeyShape(key) {
+  const k = typeof key === 'string' ? key.trim() : '';
+  const norm = normalizeServiceKey(k);
+  return `${k.length}자 · ${k.includes('%') ? 'Encoding 키로 보임 → 디코딩해서 씀' : 'Decoding 키로 보임 → 그대로 씀'}` +
+         (norm === k ? '' : ` (${norm.length}자로)`);
+}
+
 export function khoaTideUrl(serviceKey, dateYmd, code = TIDE_STATION.code) {
-  const q = new URLSearchParams({ serviceKey, obsCode: code, reqDate: dateYmd, type: 'json', numOfRows: '50', pageNo: '1' });
+  const q = new URLSearchParams({
+    serviceKey: normalizeServiceKey(serviceKey),
+    obsCode: code, reqDate: dateYmd, type: 'json', numOfRows: '50', pageNo: '1',
+  });
   return `${KHOA_TIDE_API}?${q}`;
 }
 

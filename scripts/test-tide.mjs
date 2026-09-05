@@ -15,7 +15,7 @@
 import { readFileSync } from 'node:fs';
 import {
   parseKhoaHighLow, buildTideDoc, tideInfoFrom, tideFreshness, lunarDay, mulName, newMoonMs,
-  kstDateKey, kstYmd, addDays, khoaTideUrl, TIDE_STATION, TIDE_DAYS, TIDE_STALE_MS, MIN_TIDES_PER_DAY,
+  kstDateKey, kstYmd, addDays, khoaTideUrl, normalizeServiceKey, serviceKeyShape, TIDE_STATION, TIDE_DAYS, TIDE_STALE_MS, MIN_TIDES_PER_DAY,
 } from '../src/lib/tide.mjs';
 
 let pass = 0, fail = 0;
@@ -148,5 +148,26 @@ console.log('\n⑨ KST 도우미 · URL');
   eq([u.searchParams.get('obsCode'), u.searchParams.get('reqDate'), u.searchParams.get('type')], [TIDE_STATION.code, '20260905', 'json'], '파라미터');
 }
 
+console.log('\n⑦ 인증키 모양 — 2026-09-05 첫 실행이 여기서 죽었다');
+{
+  // data.go.kr 은 키를 두 벌 준다. `khoaTideUrl` 의 URLSearchParams 가 값을 한 번 더
+  // 인코딩하므로, Encoding 키를 그대로 넣으면 이중 인코딩되어 게이트웨이가
+  // 「코드 30 SERVICE_KEY_IS_NOT_REGISTERED」를 낸다 — 키가 멀쩡한데도.
+  const DEC = 'ab+cd/ef==';
+  const ENC = encodeURIComponent(DEC);                    // 'ab%2Bcd%2Fef%3D%3D'
+  eq(normalizeServiceKey(DEC), DEC, 'Decoding 키는 손대지 않는다');
+  eq(normalizeServiceKey(ENC), DEC, 'Encoding 키는 한 번 되돌린다');
+  eq(normalizeServiceKey('  ' + DEC + '  '), DEC, '앞뒤 공백은 턴다 (시크릿 붙여넣기 사고)');
+  eq(normalizeServiceKey('100%pure'), '100%pure', '인코딩이 아닌 % 는 그대로 둔다');
+  eq(khoaTideUrl(ENC, '20260905'), khoaTideUrl(DEC, '20260905'), '두 키가 같은 URL 을 낸다');
+  eq(khoaTideUrl(DEC, '20260905').includes('serviceKey=ab%2Bcd%2Fef%3D%3D'), true, 'URL 에는 한 번만 인코딩돼 실린다');
+  eq(khoaTideUrl(ENC, '20260905').includes('%25'), false, '이중 인코딩(%25)이 남지 않는다');
+  // 진단 글귀는 **값을 절대 담지 않는다** — 공개 레포다
+  eq(serviceKeyShape(DEC).includes('ab+cd'), false, '키 모양에 값이 새지 않는다');
+  eq(serviceKeyShape(ENC).includes('Encoding'), true, 'Encoding 키를 그렇게 부른다');
+  eq(serviceKeyShape(DEC).includes('Decoding'), true, 'Decoding 키를 그렇게 부른다');
+}
+
 console.log(`\n${fail ? '❌' : '✅'} 통과 ${pass} · 실패 ${fail}`);
 process.exit(fail ? 1 : 0);
+
