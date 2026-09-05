@@ -199,6 +199,26 @@ jobs:
           await page.goto(URL, { waitUntil: 'domcontentloaded' });
           await page.waitForTimeout(6000);                 // 파이어스토어 스냅샷을 기다린다
           await shot('01-map');
+          // ── 이름 카드가 수면 칩을 안 덮는지 — **여기서만 진짜로 잴 수 있다.**
+          //  이 잡은 저장소가 빈 새 프로필이라 카드가 뜨고, 조석·바람이 **실제 값**이라
+          //  칩도 제 크기로 그려진다. 로컬 개발 세션은 프록시가 open-meteo·파이어스토어를
+          //  막아 칩이 아예 안 그려지므로 바람 응답을 흉내 내야 한다(그건 흉내다).
+          {
+            const card = page.locator('input[placeholder="예: 홍길동"]')
+              .locator('xpath=ancestor::div[contains(@class,"fixed")][1]');
+            const chip = page.getByLabel('조석·바람 자세히 보기');
+            const c = await card.count() ? await card.boundingBox() : null;
+            const ch = await chip.count() ? await chip.boundingBox() : null;
+            if (!c || !ch) {
+              console.log(`이름 카드↔칩: 못 쟀다 (카드 ${c ? '있음' : '없음'} · 칩 ${ch ? '있음' : '없음'})`);
+            } else {
+              const hit = c.x < ch.x + ch.width && ch.x < c.x + c.width
+                       && c.y < ch.y + ch.height && ch.y < c.y + c.height;
+              console.log(`이름 카드 y${Math.round(c.y)}~${Math.round(c.y + c.height)} · `
+                + `칩 y${Math.round(ch.y)}~${Math.round(ch.y + ch.height)} → ${hit ? '✗ 겹침' : '✓ 안 겹침'}`);
+              await shot('01b-namecard');
+            }
+          }
           // ★`exact: true` 가 필요하다. 새 칩의 라벨이 「조석·바람 **자세히 보기**」라
           //  느슨하게 잡으면 FAB 과 칩 **둘 다** 걸려 strict mode 로 죽는다(run 11 에서 실제로).
           await page.getByLabel('조석·바람', { exact: true }).click({ timeout: 30000 });
