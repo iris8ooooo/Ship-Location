@@ -67,13 +67,7 @@ import VisitsPanel from './components/VisitsPanel';
 import { recordVisit, recordVisitWithName, setVisitorName, nameAsked, NAME_MAX } from './lib/visits';
 import SeaChip from './components/SeaChip';
 import SeaSheet from './components/SeaSheet';
-import { seaVariant } from './components/sea-theme';
 
-/** ★조석·바람 시안. **비교용 임시물**이다 — 사용자가 하나를 고르면 이 줄과
- *  `sea-theme.ts` 의 나머지 시안, `localStorage.seaVariant` 를 **같이 지운다.**
- *  모듈 상수인 이유: 칩과 시트가 **반드시 같은 시안**이어야 하고, 렌더마다
- *  localStorage 를 읽을 이유가 없다(사파리 비공개에서는 읽기만 해도 던진다). */
-const SEA_VARIANT = seaVariant();
 
 interface ShipData {
   x: number;
@@ -1408,7 +1402,6 @@ export default function App() {
           wind={windData}
           rot={rot}
           onOpen={() => setOpenPanel(p => (p === 'info' ? null : 'info'))}
-          variant={SEA_VARIANT}
         />
       </div>
 
@@ -1509,7 +1502,6 @@ export default function App() {
           windFailed={windFailed}
           rot={rot}
           onClose={() => setOpenPanel(null)}
-          variant={SEA_VARIANT}
         />
       )}
 
