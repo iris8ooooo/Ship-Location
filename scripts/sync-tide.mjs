@@ -25,6 +25,16 @@ if (!key) {
   process.exit(2);
 }
 
+/** 오류를 사람이 읽을 한 줄로. 값·원문은 담지 않는다(공개 레포). */
+function describe(e) {
+  const msg = e?.message ?? String(e);
+  const c = e?.cause;
+  if (!c) return msg;
+  const code = c.code ?? c.errno ?? c.name;
+  const inner = c.cause?.code ?? c.cause?.message;
+  return `${msg} (${[code, inner].filter(Boolean).join(' ← ')})`;
+}
+
 const now = Date.now();
 const today = kstDateKey(now);
 console.log(`관측소 ${TIDE_STATION.name}(${TIDE_STATION.code}) · ${today}(KST) 부터 ${TIDE_DAYS}일치`);
@@ -43,8 +53,12 @@ for (let i = 0; i < TIDE_DAYS; i++) {
     days.push(d);
     console.log(`  ${date}  ${d.tides.map(t => `${t.type === 'High' ? '만' : '간'}${t.time} ${t.height}cm`).join(' · ')}`);
   } catch (e) {
-    failures.push(`${date}: ${e?.message ?? e}`);
-    console.log(`  ${date}  ✗ ${e?.message ?? e}`);
+    // ★`fetch failed` 는 undici 가 **원인을 감싸 숨긴 것**이다 — 그것만 찍으면
+    //  DNS 인지 TCP 타임아웃인지 인증서인지 알 수 없다(2026-09-05 실제로 그렇게 막혔다).
+    //  `cause` 를 같이 남긴다. 여기에는 키도 응답 원문도 들어가지 않는다.
+    const why = describe(e);
+    failures.push(`${date}: ${why}`);
+    console.log(`  ${date}  ✗ ${why}`);
   }
 }
 
