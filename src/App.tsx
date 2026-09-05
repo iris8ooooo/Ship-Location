@@ -1335,7 +1335,9 @@ export default function App() {
   const confirmName = () => {
     const nm = adminName.trim();
     if (!nm) return;
-    localStorage.setItem('adminName', nm);
+    setVisitorName(nm);          // ★`adminName` 한 칸에 쓴다 — 접속 집계도 같은 값을 읽는다
+    recordVisitWithName();       // 오늘치가 이미 이름 없이 남았으면 이름으로 한 줄 더
+    setAskName(false);           // 이름을 방금 적었으니 아래 카드는 띄울 이유가 없다
     setShowNamePrompt(false);
     setAppMode('admin');
   };
