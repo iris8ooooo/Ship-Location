@@ -66,6 +66,14 @@ import { RotateCcw, RotateCw, X, MessageSquare, Plus, Waves, Info, ChevronUp, Ch
 import VisitsPanel from './components/VisitsPanel';
 import { recordVisit, recordVisitWithName, setVisitorName, nameAsked, NAME_MAX } from './lib/visits';
 import SeaChip from './components/SeaChip';
+import SeaSheet from './components/SeaSheet';
+import { seaVariant } from './components/sea-theme';
+
+/** ★조석·바람 시안. **비교용 임시물**이다 — 사용자가 하나를 고르면 이 줄과
+ *  `sea-theme.ts` 의 나머지 시안, `localStorage.seaVariant` 를 **같이 지운다.**
+ *  모듈 상수인 이유: 칩과 시트가 **반드시 같은 시안**이어야 하고, 렌더마다
+ *  localStorage 를 읽을 이유가 없다(사파리 비공개에서는 읽기만 해도 던진다). */
+const SEA_VARIANT = seaVariant();
 
 interface ShipData {
   x: number;
@@ -1400,7 +1408,7 @@ export default function App() {
           wind={windData}
           rot={rot}
           onOpen={() => setOpenPanel(p => (p === 'info' ? null : 'info'))}
-          variant={(localStorage.getItem('seaVariant') as 'light' | 'dark' | 'mini' | null) ?? 'light'}
+          variant={SEA_VARIANT}
         />
       </div>
 
@@ -1485,124 +1493,24 @@ export default function App() {
         </div>
       )}
 
-      {/* Info Panel (Tide / Wind) */}
+      {/* 조석·바람 상세. 칩(나침반)을 탭하거나 오른쪽 🌊 FAB 으로 연다.
+          ★카드 표면은 시트가 직접 그린다 — 색·그림자가 `sea-theme.ts` 한 곳에서 오므로
+          여기서 또 감싸면 시안을 바꿀 때 이 래퍼만 옛 색으로 남는다. */}
       {openPanel === 'info' && (
-      <div className="bg-white/95 backdrop-blur p-3 rounded-2xl shadow-xl flex flex-col gap-1.5 w-auto">
-        <div className="flex justify-between items-center border-b border-gray-200 pb-1">
-          <div className="flex gap-3">
-            <button 
-              onClick={() => setInfoTab('wind')}
-              className={`font-bold text-sm pb-1 ${infoTab === 'wind' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-400'}`}
-            >
-              💨 바람
-            </button>
-            <button 
-              onClick={() => setInfoTab('tide')}
-              className={`font-bold text-sm pb-1 ${infoTab === 'tide' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-400'}`}
-            >
-              🌊 조석표
-            </button>
-          </div>
-          {infoTab === 'tide' ? (
-            // 어디서 온 값이고 언제 받은 것인지. 수신이 주기의 1.5배를 넘으믄 붉게 — "3일째 그대로" 와 "수집이 죽음" 을 가른다.
-            tideFresh && <span className={`text-[10px] ${tideFresh.stale ? 'text-red-500 font-bold' : 'text-gray-500'}`}>
-              해양조사원 {TIDE_STATION.name} · {tideFresh.text}{tideFresh.stale ? ' · 갱신 안 됨' : ''}
-            </span>
-          ) : (
-            <span className="text-[10px] text-gray-500">{windData ? `${windData.time} 기준` : '업데이트 중...'}</span>
-          )}
-        </div>
-
-        {/* Tide Tab — 예보가 없으면 없다고 말한다. 사인 공식 폴백은 없다. */}
-        {infoTab === 'tide' && !tideData && (
-          <div className="mt-1 flex flex-col items-center justify-center gap-0.5 h-24 w-full bg-gray-50 rounded-lg border border-gray-200 px-3 text-center">
-            {tideDoc === undefined ? (
-              <span className="text-sm text-gray-400">조석예보를 불러오는 중...</span>
-            ) : (
-              <>
-                <span className="text-sm font-bold text-gray-600">조석예보 없음</span>
-                <span className="text-[10px] text-gray-500">
-                  {tideDoc === null
-                    ? '국립해양조사원 예보를 아직 한 번도 받지 못했다'
-                    : `오늘치가 없다 · 마지막 ${tideFresh?.text ?? '수신 기록 없음'}`}
-                </span>
-              </>
-            )}
-          </div>
-        )}
-
-        {/* Tide Tab (Compact Design) */}
-        {infoTab === 'tide' && tideData && (
-          <div className="mt-1 flex flex-col gap-1">
-            <div className="flex justify-between items-center px-1">
-              <span className="text-[10px] font-bold text-gray-700 flex items-center gap-1">
-                <Droplets className="w-3 h-3 text-blue-500" />
-                {tideData.dateStr} 물때 ({tideData.lunarStr})
-              </span>
-              <div className="flex items-center gap-1">
-                <span className="relative flex h-1.5 w-1.5">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-blue-500"></span>
-                </span>
-                <span className="text-[9px] font-bold text-blue-600">{tideData.status}</span>
-              </div>
-            </div>
-            
-            <div className="flex justify-between gap-1">
-              {tideData.tides.map((tide, idx) => (
-                <div key={idx} className={`flex-1 ${tide.type === 'High' ? 'bg-red-50/50 border-red-100' : 'bg-blue-50/50 border-blue-100'} rounded p-1 flex flex-col items-center border`}>
-                  <div className={`flex items-center gap-0.5 ${tide.type === 'High' ? 'text-red-500' : 'text-blue-500'}`}>
-                    {tide.type === 'High' ? <ArrowUpCircle className="w-2.5 h-2.5" /> : <ArrowDownCircle className="w-2.5 h-2.5" />}
-                    <span className="text-[9px] font-bold">{tide.type === 'High' ? '만조' : '간조'}</span>
-                  </div>
-                  <span className="text-xs font-bold text-gray-800 leading-tight">{tide.time}</span>
-                  <span className="text-[8px] text-gray-500 leading-tight">{tide.height}cm</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Wind Tab */}
-        {infoTab === 'wind' && (
-          <>
-            {!windData ? (
-              <div className="mt-1 flex items-center justify-center h-24 w-full bg-gray-50 rounded-lg border border-gray-200">
-                <span className="text-sm text-gray-400">
-                  {windFailed ? '바람 정보를 못 받았습니다' : '데이터를 불러오는 중...'}
-                </span>
-              </div>
-            ) : (
-              <div className="mt-1 flex flex-col w-full bg-gradient-to-b from-cyan-50 to-white rounded-lg p-2 border border-cyan-100 shadow-sm">
-                <span className="text-[10px] font-bold text-cyan-800 mb-1 px-1">일일 풍속 추이 (m/s)</span>
-                <div className="relative w-full">
-                  <svg viewBox="0 0 240 60" className="w-full h-auto overflow-visible">
-                    <polygon 
-                      points={`0,45 ${windData.hourly.speeds.map((s, i) => `${i * (240/23)},${45 - (s/Math.max(...windData.hourly.speeds, 5))*35}`).join(' ')} 240,45`} 
-                      fill="#cffafe" opacity="0.8" 
-                    />
-                    <polyline 
-                      points={windData.hourly.speeds.map((s, i) => `${i * (240/23)},${45 - (s/Math.max(...windData.hourly.speeds, 5))*35}`).join(' ')} 
-                      fill="none" stroke="#06b6d4" strokeWidth="1.5" 
-                    />
-                    {[3, 9, 15, 21].map(i => {
-                      const x = i * (240/23);
-                      const y = 45 - (windData.hourly.speeds[i]/Math.max(...windData.hourly.speeds, 5))*35;
-                      return (
-                        <g key={i}>
-                          <circle cx={x} cy={y} r="2.5" fill="#0891b2" />
-                          <text x={x} y={y - 4} fontSize="8" fill="#164e63" textAnchor="middle" fontWeight="bold">{Math.round(windData.hourly.speeds[i] * 10) / 10}</text>
-                          <text x={x} y="55" fontSize="8" fill="#64748b" textAnchor="middle">{i}시</text>
-                        </g>
-                      )
-                    })}
-                  </svg>
-                </div>
-              </div>
-            )}
-          </>
-        )}
-      </div>
+        <SeaSheet
+          tab={infoTab}
+          onTab={setInfoTab}
+          tides={tideData?.tides ?? null}
+          lunar={tideData ? `${tideData.dateStr} · ${tideData.lunarStr}` : undefined}
+          source={tideFresh ? { text: `해양조사원 ${TIDE_STATION.name} · ${tideFresh.text}${tideFresh.stale ? ' · 갱신 안 됨' : ''}`, stale: tideFresh.stale } : null}
+          tideLoading={tideDoc === undefined}
+          nowMin={nowMin}
+          wind={windData ? { ...windData, hourly: windData.hourly.speeds } : null}
+          windFailed={windFailed}
+          rot={rot}
+          onClose={() => setOpenPanel(null)}
+          variant={SEA_VARIANT}
+        />
       )}
 
       {/* Add Ship Panel */}
@@ -1690,11 +1598,14 @@ export default function App() {
 
       {/* 오른쪽 FAB 열. 확대/축소 버튼은 없앴다 — 확대는 아래 지역 버튼과
           두 손가락 핀치(데스크톱은 휠)로 한다.
-          ★호선 카드가 떠 있으면 위로 비킨다. 이 열은 화면 세로 한가운데(실측 iPhone14
+          ★호선 카드나 시트가 떠 있으면 위로 비킨다. 이 열은 화면 세로 한가운데(실측 iPhone14
           y394~450)에 있고 카드는 아래에서 위로 자라 y266 까지 올라온다 — 그대로 두면
-          버튼이 할일 글자를 덮는다. 카드를 닫으면 제자리로 돌아온다. */}
+          버튼이 할일 글자를 덮는다. 카드를 닫으면 제자리로 돌아온다.
+          ★조석·바람 시트도 같다(2026-09-05 실측): 시트가 커지면서 🌊 버튼이 시트 머리
+          (탭 알약·「3시간 11분 남음」)를 그대로 덮었다. 겹치는 것이 늘 때마다 규칙을
+          새로 만들지 말고 **이 한 줄에 조건을 더한다.** */}
       <div className={`fixed right-3 z-50 flex flex-col gap-3 ${
-        shipCardOpen ? 'top-20' : 'top-1/2 -translate-y-1/2'
+        shipCardOpen || openPanel ? 'top-20' : 'top-1/2 -translate-y-1/2'
       }`}>
         <button
           onClick={() => setOpenPanel(p => p === 'info' ? null : 'info')}

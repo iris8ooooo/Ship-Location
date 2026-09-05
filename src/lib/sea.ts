@@ -117,3 +117,69 @@ export function untilText(mins: number): string {
   const m = mins % 60;
   return h > 0 ? `${h}시간 ${m}분` : `${m}분`;
 }
+
+/** 조석 곡선 한 점. `min` 은 그날 0시부터의 분. */
+export interface CurvePoint { min: number; cm: number }
+
+/**
+ * 만조·간조 네 점 사이를 **코사인으로 이어** 하루치 물높이 곡선을 만든다.
+ *
+ * ★왜 직선이 아니라 코사인인가 — 조석은 실제로 사인꼴로 오르내린다(그래서 뱃사람들이
+ *  「12분조」로 어림한다). 직선으로 이으면 만조 직전에도 물이 같은 속도로 드는 것처럼
+ *  보이는데, 실제로는 만조·간조 근처에서 거의 멈춘다. **그림이 사실과 달라진다.**
+ *
+ * ★하루 앞뒤는 **같은 하루가 반복된다고 보고** 감는다(첫 극값 −24h, 마지막 극값 +24h).
+ *  실제 조석은 하루에 약 50분씩 밀리므로 자정 근처는 근사다 — 지금 조석값 자체가
+ *  계산값이라 이 근사가 더 나쁠 것이 없고, 실측(KHOA)이 붙으면 **여러 날치를 받아
+ *  앞뒤 극값을 진짜 값으로 채우면 된다**(그때 이 감기를 지운다).
+ */
+export function tideCurve(tides: TideEntry[], stepMin = 10): CurvePoint[] {
+  if (tides.length < 2) return [];
+  const ext = [...tides]
+    .map(t => ({ min: toMin(t.time), cm: t.height }))
+    .sort((a, b) => a.min - b.min);
+
+  const padded = [
+    { min: ext[ext.length - 1].min - 1440, cm: ext[ext.length - 1].cm },
+    ...ext,
+    { min: ext[0].min + 1440, cm: ext[0].cm },
+  ];
+
+  const out: CurvePoint[] = [];
+  for (let m = 0; m <= 1440; m += stepMin) out.push({ min: m, cm: tideAt(padded, m) });
+  return out;
+}
+
+/** 임의 시각의 물높이. `tideCurve` 와 같은 식을 쓴다 — 「지금」 점이 곡선 위에 정확히 앉는다. */
+export function tideHeightAt(tides: TideEntry[], min: number): number | null {
+  if (tides.length < 2) return null;
+  const ext = [...tides]
+    .map(t => ({ min: toMin(t.time), cm: t.height }))
+    .sort((a, b) => a.min - b.min);
+  const padded = [
+    { min: ext[ext.length - 1].min - 1440, cm: ext[ext.length - 1].cm },
+    ...ext,
+    { min: ext[0].min + 1440, cm: ext[0].cm },
+  ];
+  return tideAt(padded, min);
+}
+
+function tideAt(padded: CurvePoint[], m: number): number {
+  for (let i = 0; i < padded.length - 1; i++) {
+    const a = padded[i], b = padded[i + 1];
+    if (m >= a.min && m <= b.min) {
+      const f = b.min === a.min ? 0 : (m - a.min) / (b.min - a.min);
+      return a.cm + (b.cm - a.cm) * (1 - Math.cos(Math.PI * f)) / 2;
+    }
+  }
+  return padded[padded.length - 1].cm;
+}
+
+/**
+ * 12시간 창을 고른다 — 지나온 3시간(맥락) + 앞으로 9시간.
+ * ★하루 24개 배열 밖으로 나가지 않게 자른다. 밖으로 나가면 그래프 끝이 조용히 0 으로 떨어진다.
+ */
+export function windWindow(hoursLen: number, nowHour: number, span = 12): { from: number; to: number } {
+  const from = Math.max(0, Math.min(nowHour - 3, hoursLen - span));
+  return { from, to: Math.min(hoursLen, from + span) };
+}
