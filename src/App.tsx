@@ -65,6 +65,7 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
 import { RotateCcw, RotateCw, X, MessageSquare, Plus, Waves, Info, ChevronUp, ChevronDown, Droplets, ArrowUpCircle, ArrowDownCircle, Lock, Unlock, ArrowLeftRight, BarChart3 } from 'lucide-react';
 import VisitsPanel from './components/VisitsPanel';
 import { recordVisit, recordVisitWithName, setVisitorName, nameAsked, NAME_MAX } from './lib/visits';
+import SeaChip from './components/SeaChip';
 
 interface ShipData {
   x: number;
@@ -204,6 +205,8 @@ export default function App() {
   const [nameInput, setNameInput] = useState('');
   const [bannerOpen, setBannerOpen] = useState(false);
   const [infoTab, setInfoTab] = useState<'tide' | 'wind'>('tide');
+  /** 지금 시각(분). 칩의 「남은 시간」이 이걸 본다 — 조석과 같은 1분 타이머로 돈다. */
+  const [windFailed, setWindFailed] = useState(false);
   const [windData, setWindData] = useState<{speed: number, direction: string, degrees: number, time: string, hourly: { speeds: number[] }} | null>(null);
   /** meta/tide 문서. undefined = 아직 안 왕다 · null = 문서가 없다(한 번도 수신 안 됨). */
   const [tideDoc, setTideDoc] = useState<TideDoc | null | undefined>(undefined);
@@ -211,6 +214,10 @@ export default function App() {
   const [tideNow, setTideNow] = useState(() => Date.now());
   const tideData: TideInfo | null = tideInfoFrom(tideDoc, tideNow);
   const tideFresh = tideFreshness(tideDoc, tideNow);
+  /** 지금 시각의 분(0~1439) — 칩과 시트가 「다음 조석까지 얼마」를 세는 데 쓴다.
+   *  ★타이머를 새로 두지 않는다. 위 조석 스냅샷 타이머가 이미 1분마다 `tideNow` 를 밀고
+   *   있으니 거기서 파생시킨다 — 두 개를 두면 한쪽만 고치게 되고 반드시 갈라진다. */
+  const nowMin = new Date(tideNow).getHours() * 60 + new Date(tideNow).getMinutes();
   
   const containerRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -577,6 +584,7 @@ export default function App() {
         const res = await fetch('https://api.open-meteo.com/v1/forecast?latitude=34.78&longitude=126.46&current_weather=true&hourly=windspeed_10m&timezone=Asia%2FSeoul&windspeed_unit=ms');
         const data = await res.json();
         if (data.current_weather && data.hourly) {
+          setWindFailed(false);
           const { windspeed, winddirection, time } = data.current_weather;
           const dirs = ['북', '북북동', '북동', '동북동', '동', '동남동', '남동', '남남동', '남', '남남서', '남서', '서남서', '서', '서북서', '북서', '북북서'];
           const dirStr = dirs[Math.round(winddirection / 22.5) % 16];
@@ -594,14 +602,11 @@ export default function App() {
         }
       } catch (error) {
         console.error('Failed to fetch wind data:', error);
-        // Fallback data in case of network error (e.g., ad blocker, offline)
-        setWindData({
-          speed: 4.2,
-          direction: '북서',
-          degrees: 315,
-          time: `${new Date().getMonth() + 1}월 ${new Date().getDate()}일 ${new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}`,
-          hourly: { speeds: [3.2, 3.5, 4.1, 4.5, 5.0, 5.2, 4.8, 4.2, 3.8, 3.5, 3.2, 3.0, 2.8, 2.5, 2.2, 2.0, 1.8, 1.5, 1.2, 1.0, 0.8, 0.5, 0.3, 0.1] }
-        });
+        // ★**지어내지 않는다** (2026-09-05). 예전에는 여기서 `4.2m/s 북서풍` 을 만들어
+        //  진짜인 것처럼 보여줬다. 이제 지도 위 나침반이 이 값을 크게 가리키므로
+        //  그건 그냥 틀린 방향을 자신 있게 가리키는 것이 된다. 못 받았으면 못 받았다고 한다.
+        setWindData(null);
+        setWindFailed(true);
       }
     };
 
@@ -1385,6 +1390,17 @@ export default function App() {
             )}
           </div>
         )}
+
+        {/* ★시트를 안 열어도 보이는 조석·바람 칩. 탭하면 자세히 보기가 열린다.
+            왼쪽 위 묶음 안에 두는 이유: 여기가 유일하게 **아무것과도 안 겹치는** 자리다
+            (오른쪽은 FAB 열, 아래는 지역 버튼·최근 업데이트 바가 이미 넷이 다툰다). */}
+        <SeaChip
+          tides={tideData?.tides ?? null}
+          nowMin={nowMin}
+          wind={windData}
+          rot={rot}
+          onOpen={() => setOpenPanel(p => (p === 'info' ? null : 'info'))}
+        />
       </div>
 
       {/* History Bottom Drawer */}
@@ -1551,7 +1567,9 @@ export default function App() {
           <>
             {!windData ? (
               <div className="mt-1 flex items-center justify-center h-24 w-full bg-gray-50 rounded-lg border border-gray-200">
-                <span className="text-sm text-gray-400">데이터를 불러오는 중...</span>
+                <span className="text-sm text-gray-400">
+                  {windFailed ? '바람 정보를 못 받았습니다' : '데이터를 불러오는 중...'}
+                </span>
               </div>
             ) : (
               <div className="mt-1 flex flex-col w-full bg-gradient-to-b from-cyan-50 to-white rounded-lg p-2 border border-cyan-100 shadow-sm">
