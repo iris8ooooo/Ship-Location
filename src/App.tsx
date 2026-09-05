@@ -1507,7 +1507,7 @@ export default function App() {
                 <span className="text-[10px] text-gray-500">
                   {tideDoc === null
                     ? '국립해양조사원 예보를 아직 한 번도 받지 못했다'
-                    : `오늘치가 없다 · 마지막 수신 ${tideFresh?.text ?? '?'}`}
+                    : `오늘치가 없다 · 마지막 ${tideFresh?.text ?? '수신 기록 없음'}`}
                 </span>
               </>
             )}
