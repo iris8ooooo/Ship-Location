@@ -88,6 +88,7 @@ export default function SeaSheet({
   const th = SEA_THEMES[variant];
   return (
     <div
+      data-sea-sheet
       style={{ background: th.card, boxShadow: th.shadow, outline: `1px solid ${th.ring}`, outlineOffset: '-1px' }}
       className="flex flex-col gap-3 rounded-3xl p-3.5 backdrop-blur-md"
     >
