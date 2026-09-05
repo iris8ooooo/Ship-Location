@@ -888,7 +888,7 @@ a.download='safetyone-map.png';a.href=c.toDataURL('image/png');a.click();})()
   `drag.ref` 가 **움직일 요소**에 붙어야 하는데, 표면을 바깥 래퍼가 갖고 있으면 손잡이는
   안쪽에 있고 움직이는 것은 바깥이 되어 **카드가 제자리에 남는다.** 집계창을 붙일 때
   래퍼를 걷어내고 `px-4` 를 본문으로 옮겼다(조석·바람 시트가 이미 같은 이유로 그렇다).
-- 끌기는 `src/components/useDragToClose.ts` **한 곳**에서 둘이 같이 쓴다.
+- 끌기는 `src/components/useDragToClose.ts` **한 곳**에서 셋이 같이 쓴다.
   ★공정 목록처럼 **제 스크롤이 있는 칸에는 끌기를 걸지 않는다** — 걸면 목록을 훑으려다 닫힌다.
 - ★**선택 해제를 pointerdown 에서 pointerup 으로 옮겼다.** 예전에는 지도를 **밀기 시작하는
   순간** 호선 카드가 닫혀, 배가 어디 있는지 보려고 지도를 미는 것 자체가 안 됐다.
