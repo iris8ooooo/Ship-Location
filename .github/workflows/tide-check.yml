@@ -106,9 +106,10 @@ jobs:
           node scripts/test-visits-rules.mjs | tee out/rules-visits.log
           node scripts/test-tide-rules.mjs  | tee out/rules-tide.log
           FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 node out/seed.mjs
-          npx vite preview --outDir dist-emu --port 4173 --strictPort > out/preview.log 2>&1 &
+          npx vite preview --outDir dist-emu --host 127.0.0.1 --port 4173 --strictPort > out/preview.log 2>&1 &
           PV=$!
           for i in $(seq 1 30); do curl -sf http://127.0.0.1:4173/ >/dev/null && break; sleep 1; done
+          curl -sf http://127.0.0.1:4173/ >/dev/null || { echo "preview 가 안 뜬다:"; cat out/preview.log; exit 1; }
           node out/render.mjs | tee out/render.log
           kill $PV || true
           EOF
