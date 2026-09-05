@@ -1,0 +1,111 @@
+name: Check auth providers
+
+# 접속 집계창은 **구글 로그인**으로 오너를 가린다(firestore.rules 의 isOwner).
+# 그 공급자가 파이어베이스 프로젝트에 꺼져 있으면 오너 본인도 못 읽는다 —
+# 앱은 `auth/operation-not-allowed` 를 보여줄 뿐이라 원인을 모른 채 헤매기 쉽다.
+#
+# 그래서 **실제로 재 본다.** 그리고 켤 수 있으면 켠다.
+# ★못 켜면(권한 없음) 사람이 눌러야 하는 정확한 경로를 요약에 남긴다 —
+#  "사용자에게 넘기는 건 정말 사용자만 할 수 있는 것뿐" 이라는 원칙 그대로다.
+#
+# ★공개 레포다. 응답을 통째로 찍지 않는다 — 공급자 이름과 켜짐/꺼짐만 찍는다.
+
+on:
+  workflow_dispatch:
+    inputs:
+      enable:
+        description: '꺼져 있으면 켜기까지 시도할까 (yes/no)'
+        required: false
+        default: 'no'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/cloud-platform
+        id: auth
+
+      - name: 공급자 목록을 읽는다
+        env:
+          TOKEN: ${{ steps.auth.outputs.access_token }}
+          PROJ: ${{ secrets.GCP_PROJECT_ID }}
+          WANT: ${{ github.event.inputs.enable }}
+        run: |
+          set -o pipefail
+          API="https://identitytoolkit.googleapis.com/admin/v2/projects/$PROJ"
+          CODE=$(curl -sS -o /tmp/idp.json -w '%{http_code}' \
+            -H "Authorization: Bearer $TOKEN" "$API/defaultSupportedIdpConfigs")
+          echo "defaultSupportedIdpConfigs → http=$CODE"
+
+          if [ "$CODE" = "403" ] || [ "$CODE" = "401" ]; then
+            {
+              echo "## 구글 로그인 상태 — **확인 불가 (권한 없음)**"
+              echo
+              echo "배포 서비스계정에 \`roles/firebaseauth.viewer\`(또는 admin)가 없어 조회가 막혔다."
+              echo "서비스계정은 자기에게 역할을 줄 수 없다 — 그건 프로젝트 IAM 관리자 권한이다."
+              echo
+              echo "**사람이 한 번 눌러야 하는 것 (30초):**"
+              echo "1. https://console.firebase.google.com/project/$PROJ/authentication/providers"
+              echo "2. **Google** 공급자가 '사용 설정됨' 인지 본다. 아니면 켠다."
+              echo
+              echo "그게 꺼져 있으면 접속 집계창에서 로그인이 \`auth/operation-not-allowed\` 로 실패한다."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::권한이 없어 공급자 상태를 못 봤다. 요약의 콘솔 경로를 따르면 된다."
+            exit 0
+          fi
+
+          # ★응답 전체를 찍지 않는다. 공급자 이름과 enabled 만 뽑는다.
+          node -e '
+            const j = JSON.parse(require("fs").readFileSync("/tmp/idp.json","utf8"));
+            if (j.error) { console.log("오류:", j.error.status, (j.error.message||"").slice(0,120)); process.exit(0); }
+            const list = j.defaultSupportedIdpConfigs || [];
+            if (!list.length) { console.log("등록된 공급자 없음"); process.exit(0); }
+            for (const c of list) console.log(`  ${String(c.name||"").split("/").pop()}  enabled=${c.enabled === true}`);
+          ' | tee /tmp/idp.txt
+
+          {
+            echo "## 구글 로그인 상태"
+            echo
+            echo '```'
+            cat /tmp/idp.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if grep -q 'google.com  enabled=true' /tmp/idp.txt; then
+            echo "✅ 구글 로그인이 켜져 있다 — 접속 집계창이 그대로 동작한다."
+            echo '✅ **구글 로그인이 켜져 있다** — 접속 집계창이 그대로 동작한다.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          echo "::warning::구글 로그인이 꺼져 있거나 등록돼 있지 않다."
+          if [ "$WANT" != "yes" ]; then
+            echo '⚠ **구글 로그인이 꺼져 있다.** `enable=yes` 로 다시 돌리면 켜기를 시도한다.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          echo "켜기를 시도한다…"
+          UP=$(curl -sS -o /tmp/up.json -w '%{http_code}' -X PATCH \
+            -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+            "$API/defaultSupportedIdpConfigs/google.com?updateMask=enabled" \
+            -d '{"enabled":true}')
+          echo "PATCH → http=$UP"
+          if [ "$UP" = "200" ]; then
+            echo '✅ 켰다.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "❌ 못 켰다 (http=$UP). 사람이 눌러야 한다:"
+              echo "https://console.firebase.google.com/project/$PROJ/authentication/providers → Google 사용 설정"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
