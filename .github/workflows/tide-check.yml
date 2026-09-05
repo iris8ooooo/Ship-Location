@@ -19,6 +19,8 @@ on:
       - 'scripts/sync-tide.mjs'
       - 'scripts/test-tide*.mjs'
       - 'scripts/fixtures/khoa-tide-*.json'
+      - 'src/App.tsx'
+      - 'src/firebase.ts'
       - 'firestore.rules'
       - '.github/workflows/tide-check.yml'
 
