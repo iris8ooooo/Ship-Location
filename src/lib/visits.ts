@@ -22,6 +22,9 @@ import {
   addDoc, collection, getDocs, limit, orderBy, query, serverTimestamp, where, Timestamp,
 } from 'firebase/firestore';
 import { db } from '../firebase';
+import { groupVisits, kstDay, type VisitRow, type VisitStats } from './visits-agg';
+
+export type { DayStat, VisitStats } from './visits-agg';
 
 const DEVICE_KEY = 'visitorDevice';
 const NAME_KEY = 'visitorName';
@@ -29,12 +32,6 @@ const LAST_DAY_KEY = 'visitDay';
 
 /** 이름 길이 상한. **규칙에도 같은 값이 박혀 있다** — 넘기면 쓰기가 거부된다. */
 export const NAME_MAX = 20;
-
-/** 로컬(한국시간) 기준 YYYY-MM-DD. `toISOString` 은 UTC 라 아침에 어제가 나온다. */
-function kstDay(d: Date): string {
-  const t = new Date(d.getTime() + 9 * 3600 * 1000);
-  return t.toISOString().slice(0, 10);
-}
 
 /** 이 기기의 id. 없으면 만든다. 사람이 아니라 **브라우저 하나**를 가리킨다. */
 function deviceId(): string {
@@ -70,13 +67,15 @@ export function nameAsked(): boolean {
  * ★실패해도 조용히 넘어간다 — **지도가 먼저다.** 집계 때문에 앱이 안 뜨면 본말전도다.
  *  (단, 실패를 삼키는 대신 콘솔에는 남긴다.)
  */
-export async function recordVisit(): Promise<void> {
+export async function recordVisit(force = false): Promise<void> {
   const device = deviceId();
   if (!device) return;
   const today = kstDay(new Date());
-  try {
-    if (localStorage.getItem(LAST_DAY_KEY) === today) return;
-  } catch { /* 저장소가 막혔으면 그냥 쓴다 — 중복은 집계에서 걸러진다 */ }
+  if (!force) {
+    try {
+      if (localStorage.getItem(LAST_DAY_KEY) === today) return;
+    } catch { /* 저장소가 막혔으면 그냥 쓴다 — 중복은 집계에서 걸러진다 */ }
+  }
 
   try {
     await addDoc(collection(db, 'visits'), {
@@ -90,24 +89,17 @@ export async function recordVisit(): Promise<void> {
   }
 }
 
-export interface DayStat {
-  /** YYYY-MM-DD (KST) */
-  day: string;
-  /** 그날 접속한 **기기 수** */
-  people: number;
-  /** 그날 이름을 밝힌 사람들 (중복 없음, 가나다순) */
-  names: string[];
-  /** 그날 이름 없이 들어온 기기 수 */
-  anon: number;
-}
-
-export interface VisitStats {
-  days: DayStat[];          // 최근 → 과거
-  today: DayStat;
-  /** 기간 전체의 기기 수 */
-  totalPeople: number;
-  /** 상한에 닿아 과거가 잘렸는가. 잘렸으면 숫자를 믿으면 안 된다. */
-  truncated: boolean;
+/**
+ * 이름을 **방금** 적었을 때 오늘치를 이름과 함께 한 줄 더 남긴다.
+ *
+ * ★왜 고치지 않고 한 줄 더 쓰나 — 규칙이 `update` 를 **오너에게도** 막아 뒀다(봉인).
+ *  그런데 접속 기록은 앱이 뜨자마자 남고 이름은 1.5초 뒤에나 적으므로, 안 그러면
+ *  **이름을 적은 그날 하루만** 본인이 「이름 미등록」으로 남는다.
+ * ★수가 부풀지 않는다 — 집계가 **기기 단위**로 묶고, 같은 기기의 두 줄 중
+ *  이름이 있는 쪽이 이긴다(fetchVisitStats).
+ */
+export function recordVisitWithName(): void {
+  void recordVisit(true);
 }
 
 const READ_LIMIT = 3000;
@@ -127,36 +119,13 @@ export async function fetchVisitStats(days = 14): Promise<VisitStats> {
     limit(READ_LIMIT),
   ));
 
-  const byDay = new Map<string, { devices: Set<string>; names: Set<string>; anon: Set<string> }>();
-  const allDevices = new Set<string>();
-
+  const rows: VisitRow[] = [];
   snap.forEach(d => {
     const v = d.data() as { device?: string; name?: string; at?: Timestamp };
     const ts = v.at?.toDate?.();
-    if (!ts || !v.device) return;                 // 서버 시각이 아직 안 박힌 문서는 건너뛴다
-    const day = kstDay(ts);
-    const g = byDay.get(day) ?? { devices: new Set(), names: new Set(), anon: new Set() };
-    g.devices.add(v.device);
-    const nm = (v.name ?? '').trim();
-    if (nm) g.names.add(nm); else g.anon.add(v.device);
-    byDay.set(day, g);
-    allDevices.add(v.device);
+    if (!ts || !v.device) return;               // 서버 시각이 아직 안 박힌 문서는 건너뛴다
+    rows.push({ device: v.device, name: v.name ?? '', day: kstDay(ts) });
   });
 
-  const list: DayStat[] = [...byDay.entries()]
-    .sort((a, b) => (a[0] < b[0] ? 1 : -1))       // 최근이 위
-    .map(([day, g]) => ({
-      day,
-      people: g.devices.size,
-      names: [...g.names].sort((a, b) => a.localeCompare(b, 'ko')),
-      anon: g.anon.size,
-    }));
-
-  const today = kstDay(new Date());
-  return {
-    days: list,
-    today: list.find(d => d.day === today) ?? { day: today, people: 0, names: [], anon: 0 },
-    totalPeople: allDevices.size,
-    truncated: snap.size >= READ_LIMIT,
-  };
+  return groupVisits(rows, kstDay(new Date()), snap.size >= READ_LIMIT);
 }

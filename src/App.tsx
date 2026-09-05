@@ -63,7 +63,7 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
 }
 import { RotateCcw, RotateCw, X, MessageSquare, Plus, Waves, Info, ChevronUp, ChevronDown, Droplets, ArrowUpCircle, ArrowDownCircle, Lock, Unlock, ArrowLeftRight, BarChart3 } from 'lucide-react';
 import VisitsPanel from './components/VisitsPanel';
-import { recordVisit, setVisitorName, nameAsked, NAME_MAX } from './lib/visits';
+import { recordVisit, recordVisitWithName, setVisitorName, nameAsked, NAME_MAX } from './lib/visits';
 
 interface ShipData {
   x: number;
@@ -1727,6 +1727,7 @@ export default function App() {
         <div className="fixed left-2 right-2 top-3 z-[60] mx-auto max-w-sm rounded-2xl bg-white/97 backdrop-blur shadow-xl border border-gray-200 px-4 py-3">
           <p className="text-[13px] text-gray-700 leading-relaxed">
             누가 보고 있는지 알 수 있게 <b>성함</b>을 한 번만 남겨 주십시오.
+            <span className="text-gray-500"> 다음부터는 안 묻습니다.</span>
             <span className="text-gray-500"> 안 적으셔도 앱은 그대로 쓰실 수 있습니다.</span>
           </p>
           <div className="mt-2 flex gap-2">
@@ -1737,11 +1738,11 @@ export default function App() {
               placeholder="예: 홍길동"
               className="min-w-0 flex-1 border-2 border-gray-300 px-3 py-2 rounded-lg text-[15px] text-gray-800 focus:border-blue-500 focus:outline-none"
               onKeyDown={e => {
-                if (e.key === 'Enter' && nameInput.trim()) { setVisitorName(nameInput); setAskName(false); }
+                if (e.key === 'Enter' && nameInput.trim()) { setVisitorName(nameInput); recordVisitWithName(); setAskName(false); }
               }}
             />
             <button
-              onClick={() => { if (nameInput.trim()) { setVisitorName(nameInput); setAskName(false); } }}
+              onClick={() => { if (nameInput.trim()) { setVisitorName(nameInput); recordVisitWithName(); setAskName(false); } }}
               className="shrink-0 bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 rounded-lg"
             >
               저장

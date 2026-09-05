@@ -20,7 +20,7 @@ import { fetchVisitStats, type VisitStats } from '../lib/visits';
 
 type State =
   | { k: 'loading' }
-  | { k: 'need-login'; why?: string }
+  | { k: 'need-login'; why?: string; signedIn?: boolean }
   | { k: 'ready'; stats: VisitStats }
   | { k: 'error'; msg: string };
 
@@ -42,7 +42,10 @@ export default function VisitsPanel({ onClose }: { onClose: () => void }) {
       setState({ k: 'ready', stats: await fetchVisitStats(14) });
     } catch (e: unknown) {
       const code = (e as { code?: string })?.code ?? '';
-      if (code === 'permission-denied') setState({ k: 'need-login' });
+      // ★「로그인 안 함」과 「로그인은 했는데 주인이 아님」을 **갈라야 한다.**
+      //  안 가르면 다른 관리자가 자기 계정으로 로그인 → 또 「로그인」 버튼 → 무한 반복이 되고,
+      //  본인은 왜 안 보이는지 영영 모른다. 막는 것은 규칙이 하고, **설명은 화면이 한다.**
+      if (code === 'permission-denied') setState({ k: 'need-login', signedIn: !!auth.currentUser });
       else setState({ k: 'error', msg: `${code || e}` });
     }
   }, []);
@@ -52,6 +55,8 @@ export default function VisitsPanel({ onClose }: { onClose: () => void }) {
   const signIn = async () => {
     setBusy(true);
     const provider = new GoogleAuthProvider();
+    // 이미 다른 계정으로 들어와 있을 수 있다. 계정 고르는 화면을 강제한다.
+    provider.setCustomParameters({ prompt: 'select_account' });
     try {
       await signInWithPopup(auth, provider);
     } catch (e: unknown) {
@@ -88,17 +93,25 @@ export default function VisitsPanel({ onClose }: { onClose: () => void }) {
 
       {state.k === 'need-login' && (
         <div className="flex flex-col gap-2">
-          <p className="text-gray-600 leading-relaxed">
-            접속기록은 <b>주인 계정으로 로그인해야</b> 볼 수 있습니다.
-            서버가 막고 있어서 이 화면을 열어도 남은 못 봅니다.
-          </p>
+          {state.signedIn ? (
+            <p className="text-gray-600 leading-relaxed">
+              <b className="break-all">{user?.email ?? '이 계정'}</b> 으로는 접속기록을 볼 수 없습니다.
+              이 화면은 <b>주인 계정 한 사람</b>만 열 수 있고, 그 판정은 화면이 아니라
+              <b> 서버</b>가 합니다 — 관리자 모드로 들어와도 마찬가지입니다.
+            </p>
+          ) : (
+            <p className="text-gray-600 leading-relaxed">
+              접속기록은 <b>주인 계정으로 로그인해야</b> 볼 수 있습니다.
+              서버가 막고 있어서 이 화면을 열어도 남은 못 봅니다.
+            </p>
+          )}
           {state.why && <p className="text-[11px] text-red-600 break-all">{state.why}</p>}
           <button
             onClick={signIn}
             disabled={busy}
             className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold py-2.5 rounded-lg transition-colors"
           >
-            {busy ? '여는 중…' : '구글 계정으로 로그인'}
+            {busy ? '여는 중…' : state.signedIn ? '다른 계정으로 로그인' : '구글 계정으로 로그인'}
           </button>
         </div>
       )}
