@@ -1296,6 +1296,25 @@ export default function App() {
       setSelectedShipId(null);
       setSelectedZoneId(null);
     }
+    // 지도를 **톡 친 것**인지 재기 시작한다 (아래 handleMapPointerUp 이 판정한다).
+    mapTapRef.current = e.isPrimary ? { x: e.clientX, y: e.clientY, t: Date.now() } : null;
+  };
+
+  /**
+   * 지도를 톡 치면 열려 있던 시트를 닫는다 (2026-09-05 사용자 지시).
+   *
+   * ★**민 것·꾹 누른 것과 갈라야 한다.** 지도는 한 손가락 밀기로 팬하고, 배는 600ms 꾹
+   *  눌러야 잡힌다 — 그 둘을 닫기로 오인하면 지도를 볼 수가 없다. 그래서 배 끌기와 **같은
+   *  잣대**를 쓴다: 8px 안, 500ms 안일 때만 「탭」이다.
+   * ★두 손가락(핀치)이 닿는 순간 취소한다. 줌아웃하다 시트가 닫히면 황당하다.
+   */
+  const handleMapPointerUp = (e: ReactPointerEvent) => {
+    const start = mapTapRef.current;
+    mapTapRef.current = null;
+    if (!start || !openPanel) return;
+    if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > 8) return;
+    if (Date.now() - start.t > 500) return;
+    setOpenPanel(null);
   };
 
   /** 이름을 받고 관리자로 들어간다. 이름을 받으려던 이유가 그것이다. */
@@ -1308,6 +1327,9 @@ export default function App() {
     setShowNamePrompt(false);
     setAppMode('admin');
   };
+
+  /** 지도를 「톡 친」 것인지 재는 값. 시트 닫기 판정에만 쓴다. */
+  const mapTapRef = useRef<{ x: number; y: number; t: number } | null>(null);
 
   /** 뷰어에서 호선 카드가 떠 있는가. 오른쪽 FAB 열이 이걸 보고 위로 비킨다. */
   const shipCardOpen = appMode !== 'admin' && !!selectedShipId && !!ships[selectedShipId];
@@ -1393,9 +1415,13 @@ export default function App() {
           </div>
         )}
 
-        {/* ★시트를 안 열어도 보이는 조석·바람 칩. 탭하면 자세히 보기가 열린다.
-            왼쪽 위 묶음 안에 두는 이유: 여기가 유일하게 **아무것과도 안 겹치는** 자리다
-            (오른쪽은 FAB 열, 아래는 지역 버튼·최근 업데이트 바가 이미 넷이 다툰다). */}
+      </div>
+
+      {/* ★조석·바람 칩 — **오른쪽 위** (2026-09-05 사용자 지시).
+          왼쪽에 뒀더니 첫 화면에서 2안벽 배들(8203·8207·8208)을 덮었다. 오른쪽 위는
+          자재지원부·호텔 앞이라 **배가 서지 않는 구간**이다(CLAUDE.md 선석 표 참고).
+          ★아래 FAB 열이 패널 열릴 때 `top-24` 로 내려가 이 칩을 피한다 — 칩 아래끝이 82px 다. */}
+      <div className="fixed top-3 right-3 z-50">
         <SeaChip
           tides={tideData?.tides ?? null}
           nowMin={nowMin}
@@ -1593,11 +1619,13 @@ export default function App() {
           ★호선 카드나 시트가 떠 있으면 위로 비킨다. 이 열은 화면 세로 한가운데(실측 iPhone14
           y394~450)에 있고 카드는 아래에서 위로 자라 y266 까지 올라온다 — 그대로 두면
           버튼이 할일 글자를 덮는다. 카드를 닫으면 제자리로 돌아온다.
+          ★`top-24` 인 이유는 조석·바람 칩이 오른쪽 위(아래끝 82px)에 있기 때문이다 —
+          `top-20`(80px)이면 2px 겹친다.
           ★조석·바람 시트도 같다(2026-09-05 실측): 시트가 커지면서 🌊 버튼이 시트 머리
           (탭 알약·「3시간 11분 남음」)를 그대로 덮었다. 겹치는 것이 늘 때마다 규칙을
           새로 만들지 말고 **이 한 줄에 조건을 더한다.** */}
       <div className={`fixed right-3 z-50 flex flex-col gap-3 ${
-        shipCardOpen || openPanel ? 'top-20' : 'top-1/2 -translate-y-1/2'
+        shipCardOpen || openPanel ? 'top-24' : 'top-1/2 -translate-y-1/2'
       }`}>
         <button
           onClick={() => setOpenPanel(p => p === 'info' ? null : 'info')}
@@ -1799,6 +1827,8 @@ export default function App() {
         ref={attachViewport}
         className="flex-1 overflow-auto relative touch-none bg-[#dbe9f4]"
         onPointerDown={handleBackgroundPointerDown}
+        onPointerUp={handleMapPointerUp}
+        onPointerCancel={() => { mapTapRef.current = null; }}
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
       >
