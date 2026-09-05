@@ -17,6 +17,10 @@ on:
         description: '프로덕션(Cloud Run) 실제 화면도 찍는다 — 진짜 파이어스토어·진짜 시각'
         type: boolean
         default: false
+      b64:
+        description: '그 화면을 로그에 base64 로도 찍는다 (아티팩트를 못 받는 세션용)'
+        type: boolean
+        default: false
   pull_request:
     paths:
       - 'src/lib/tide.mjs'
@@ -164,6 +168,8 @@ jobs:
   prod:
     if: github.event_name == 'workflow_dispatch' && inputs.prod
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -181,22 +187,80 @@ jobs:
           import { chromium } from 'playwright';
           const URL = 'https://hd-ship-location-238928524992.us-west1.run.app/';
           const b = await chromium.launch();
-          const ctx = await b.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2,
+          // ★배치를 확인하는 용도라 dsf 1 이면 충분하다. 2 로 찍으면 PNG 가 커져
+          //  로그로 내보낼 수가 없다(아래 b64 스텝).
+          const ctx = await b.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1,
             isMobile: true, hasTouch: true, locale: 'ko-KR', timezoneId: 'Asia/Seoul' });
           const page = await ctx.newPage();
+          const shot = async (name) => {
+            await page.screenshot({ path: `out/prod/${name}.png` });
+            await page.screenshot({ path: `out/prod/${name}.jpg`, type: 'jpeg', quality: 62 });
+          };
           await page.goto(URL, { waitUntil: 'domcontentloaded' });
           await page.waitForTimeout(6000);                 // 파이어스토어 스냅샷을 기다린다
-          await page.screenshot({ path: 'out/prod/01-map.png' });
+          await shot('01-map');
           // ★`exact: true` 가 필요하다. 새 칩의 라벨이 「조석·바람 **자세히 보기**」라
           //  느슨하게 잡으면 FAB 과 칩 **둘 다** 걸려 strict mode 로 죽는다(run 11 에서 실제로).
           await page.getByLabel('조석·바람', { exact: true }).click({ timeout: 30000 });
           await page.waitForTimeout(3000);
-          await page.screenshot({ path: 'out/prod/02-open.png' });
+          await shot('02-open');
           // 조석 탭을 확실히 고른 뒤 한 장 더 — 기본 탭이 무엇이든 조석을 본다
           await page.getByRole('button', { name: '조석', exact: true }).click({ timeout: 10000 }).catch(() => {});
           await page.waitForTimeout(1500);
-          await page.screenshot({ path: 'out/prod/03-tide.png' });
+          await shot('03-tide');
+          // ── 호선 카드(공정창) — 조석·바람 시트와 **같은 방법으로** 닫히는지 실제로 해 본다.
+          //  ★로컬에서는 못 잰다: 파이어스토어가 개발 세션에서 막혀 배가 한 척도 없고,
+          //   DOM 에 마커를 심어 봐야 React 핸들러가 안 붙어 카드가 안 뜬다.
+          //   진짜 배가 있는 곳은 프로덕션뿐이다.
+          const card = page.locator('div.fixed').filter({ has: page.getByLabel('닫기') }).first();
+          const marker = page.locator('[id^="ship-"]').first();
+          if (await marker.count()) {
+            await page.getByLabel('닫기').first().click({ timeout: 5000 }).catch(() => {});  // 시트를 먼저 닫는다
+            await page.waitForTimeout(600);
+            await marker.click({ timeout: 10000 }).catch(() => {});
+            await page.waitForTimeout(2500);
+            const open1 = await card.count();
+            await shot('04-card');
+            if (open1) {
+              const btn = await page.getByLabel('닫기').first().boundingBox();
+              console.log(`호선 카드 닫기 버튼 ${Math.round(btn.width)}x${Math.round(btn.height)}`
+                + (btn.width >= 44 && btn.height >= 44 ? ' ✓ 44px 이상' : ' ✗ 작다'));
+              const box = await card.boundingBox();
+              const cx = box.x + box.width / 2;
+              // ① 조금만 끈다 → 닫히면 안 된다
+              await page.mouse.move(cx, box.y + 8); await page.mouse.down();
+              await page.mouse.move(cx, box.y + 38, { steps: 6 }); await page.mouse.up();
+              await page.waitForTimeout(400);
+              console.log(`30px 끌었을 때 ${await card.count() ? '✓ 그대로' : '✗ 닫힘'}`);
+              // ② 충분히 끈다 → 닫혀야 한다
+              const box2 = await card.boundingBox();
+              if (box2) {
+                await page.mouse.move(cx, box2.y + 8); await page.mouse.down();
+                await page.mouse.move(cx, box2.y + 130, { steps: 10 }); await page.mouse.up();
+                await page.waitForTimeout(400);
+              }
+              console.log(`120px 끌었을 때 ${await card.count() ? '✗ 안 닫힘' : '✓ 닫힘'}`);
+              // ③ 지도를 밀면 안 닫히고, 톡 치면 닫혀야 한다
+              await marker.click({ timeout: 10000 }).catch(() => {});
+              await page.waitForTimeout(2000);
+              const mx = 195, my = 250;
+              await page.mouse.move(mx, my); await page.mouse.down();
+              await page.mouse.move(mx - 70, my + 12, { steps: 8 }); await page.mouse.up();
+              await page.waitForTimeout(400);
+              console.log(`지도를 밀었을 때 ${await card.count() ? '✓ 그대로' : '✗ 닫힘'}`);
+              await page.mouse.move(mx, my); await page.mouse.down(); await page.mouse.up();
+              await page.waitForTimeout(400);
+              console.log(`지도를 톡 쳤을 때 ${await card.count() ? '✗ 안 닫힘' : '✓ 닫힘'}`);
+            } else {
+              console.log('호선 카드가 안 떴다 — 배를 못 찾았거나 뷰어 모드가 아니다');
+            }
+          } else {
+            console.log('지도에 호선 마커가 없다 — 카드 검사 건너뜀');
+          }
+
           // 시트든 옛 패널이든 열린 것을 글자로 읽는다 — 배포 전후 어느 쪽이어도 뭔가 남는다
+          await page.getByLabel('조석·바람', { exact: true }).click({ timeout: 10000 }).catch(() => {});
+          await page.waitForTimeout(1500);
           const sheet = page.locator('[data-sea-sheet]');
           const txt = await (await sheet.count()
             ? sheet.innerText()
@@ -212,6 +276,26 @@ jobs:
             cat out/prod.log
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+      # ★아티팩트를 **못 받는 세션**이 있다. 개발 샌드박스는 프록시가 blob 저장소를 막아
+      #  스크린샷을 올려 둬도 열어 볼 수가 없다 — 볼 수 없는 스크린샷은 그 세션에 없는 것과 같다.
+      #  `raw.githubusercontent.com` 은 닿으므로 **전용 브랜치 하나에 덮어써서** 그리로 내준다.
+      #  ★히스토리를 쌓지 않는다(고아 커밋 + force). 이 브랜치는 언제 지워도 되는 임시물이고
+      #   main 에는 영영 들어가지 않는다.
+      - name: 화면을 prod-shots 브랜치로 (b64 입력)
+        if: inputs.b64
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd out/prod
+          git init -q .
+          git checkout -q --orphan prod-shots
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A ./*.jpg
+          git -c commit.gpgsign=false commit -qm "프로덕션 화면 ${{ github.run_number }} (임시 — 개발 세션이 보려고)"
+          git push -q -f "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" prod-shots
+          echo "→ https://raw.githubusercontent.com/${{ github.repository }}/prod-shots/03-tide.jpg"
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
