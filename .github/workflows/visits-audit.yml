@@ -1,0 +1,58 @@
+name: Visits audit
+
+# 「이름 미등록 N명」이 **왜** 이름이 없는지 재는 액션 (2026-09-05 사용자 질문).
+#
+# ★공개 레포다. **이름도 기기 id 도 절대 찍지 않는다.** 찍는 것은 숫자와 시각뿐이다.
+#  (전례: env 를 통째로 찍었다가 Gemini API 키가 공개 로그에 남았다.)
+#  집계창은 오너만 읽을 수 있고 이 액션은 서비스계정으로 **규칙을 우회해** 읽는다 —
+#  그래서 더더욱 값을 안 찍는다. 판정에 필요한 건 「언제 처음 들어왔나」뿐이다.
+#
+# ★조용한 오답 방지: 받은 건수가 페이지 상한과 같으면 잘린 것이므로 **실패시킨다.**
+
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: '며칠치를 볼 것인가'
+        required: false
+        default: '14'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 시크릿 확인
+        run: |
+          if [ -z "${{ secrets.GCP_PROJECT_ID }}" ] \
+          || [ -z "${{ secrets.GCP_WIF_PROVIDER }}" ] \
+          || [ -z "${{ secrets.GCP_SERVICE_ACCOUNT }}" ]; then
+            echo "::error::GCP 시크릿이 없다. 사람이 일부러 돌렸는데 아무 일도 안 하고 초록불이면 거짓말이다."
+            exit 1
+          fi
+
+      - uses: google-github-actions/auth@v2
+        id: auth
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          token_format: access_token
+
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+
+      - name: visits 를 읽어 「왜 이름이 없나」를 센다
+        env:
+          TOKEN: ${{ steps.auth.outputs.access_token }}
+          DAYS: ${{ inputs.days }}
+        run: node scripts/audit-visits.mjs 2>&1 | tee out.log
+
+      - name: 요약
+        if: always()
+        run: { echo '## 접속 기록 감사'; echo '```'; cat out.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
