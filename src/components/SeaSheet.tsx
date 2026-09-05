@@ -71,16 +71,68 @@ function useScrub(len: number) {
 
 const W = 340;
 
+/** 이만큼 내리면 닫는다. 짧으면 살짝 스치기만 해도 닫히고, 길면 「안 닫히네」가 된다. */
+const CLOSE_PX = 64;
+
+/**
+ * 아이폰 시트처럼 **위쪽을 아래로 끌어 닫는다** (2026-09-05 사용자 지시).
+ *
+ * ★**React 상태로 두면 안 된다.** 끌 때마다 리렌더가 나면 손가락 밑의 노드가 갈리고,
+ *  이 레포는 정확히 그것 때문에 핀치가 한 프레임 만에 죽는 것을 겪었다
+ *  (`dangerouslySetInnerHTML` 사건). 배 끌기의 빨간 테두리를 DOM 에 직접 그린 것과 같은 이유로,
+ *  끄는 동안에는 `style.transform` 을 **DOM 에 직접** 쓰고 놓을 때만 결정한다.
+ * ★`translate3d`·`will-change` 를 쓰지 않는다 — GPU 레이어로 승격되면 그 위 글자가 흐려진다.
+ */
+function useDragToClose(onClose: () => void) {
+  const ref = useRef<HTMLDivElement>(null);
+  const from = useRef<number | null>(null);
+
+  const paint = (dy: number) => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.transform = dy ? `translateY(${dy}px)` : '';
+    el.style.opacity = dy ? String(Math.max(0.4, 1 - dy / 300)) : '';
+  };
+  const dyOf = (e: React.PointerEvent) => Math.max(0, e.clientY - (from.current ?? e.clientY));
+
+  return {
+    ref,
+    handlers: {
+      onPointerDown: (e: React.PointerEvent) => {
+        if (e.pointerType === 'mouse' && e.button !== 0) return;
+        from.current = e.clientY;
+        e.currentTarget.setPointerCapture(e.pointerId);
+      },
+      onPointerMove: (e: React.PointerEvent) => { if (from.current !== null) paint(dyOf(e)); },
+      onPointerUp: (e: React.PointerEvent) => {
+        if (from.current === null) return;
+        const dy = dyOf(e);
+        from.current = null;
+        paint(0);
+        if (dy > CLOSE_PX) onClose();
+      },
+      onPointerCancel: () => { from.current = null; paint(0); },
+    },
+  };
+}
+
 export default function SeaSheet({
   tab, onTab, tides, lunar, source, tideLoading, nowMin, wind, windFailed, rot, onClose,
 }: SeaSheetProps) {
+  const drag = useDragToClose(onClose);
+
   return (
     <div
+      ref={drag.ref}
       data-sea-sheet
       style={{ background: SEA.card, boxShadow: SEA.shadow, outline: `1px solid ${SEA.ring}`, outlineOffset: '-1px' }}
       className="overflow-hidden rounded-3xl backdrop-blur-md"
     >
-      <div className="flex items-center gap-2 px-3.5 pb-2.5 pt-3">
+      {/* 손잡이 — 여기와 아래 머리줄을 아래로 끌면 닫힌다 */}
+      <div {...drag.handlers} className="flex touch-none cursor-grab justify-center pb-0.5 pt-2 active:cursor-grabbing">
+        <span className="h-1 w-10 rounded-full" style={{ background: 'rgba(255,255,255,0.28)' }} aria-hidden />
+      </div>
+      <div {...drag.handlers} className="flex touch-none items-center gap-2 px-3 pb-2 pt-1.5">
         {/* 알약 하나가 트랙 안에서 옮겨 다니는 꼴 — 두 글자가 각자 밑줄을 갖는 것보다 조용하다 */}
         <div className="flex items-center gap-0.5 rounded-full p-0.5" style={{ background: SEA.tabTrack }}>
           {(['tide', 'wind'] as const).map(k => (
@@ -88,7 +140,8 @@ export default function SeaSheet({
               style={tab === k
                 ? { background: SEA.tabOn, color: SEA.tabOnInk }
                 : { color: SEA.tabOffInk }}
-              className="rounded-full px-3.5 py-1 text-[12px] font-extrabold">
+              onPointerDown={e => e.stopPropagation()}
+              className="rounded-full px-3.5 py-1.5 text-[12px] font-extrabold">
               {k === 'wind' ? '바람' : '조석'}
             </button>
           ))}
@@ -98,8 +151,14 @@ export default function SeaSheet({
           style={{ color: tab === 'tide' && source?.stale ? SEA.now : SEA.mute }}>
           {tab === 'wind' ? (wind ? `${wind.time} 기준` : '') : (source?.text ?? '')}
         </span>
-        <button onClick={onClose} aria-label="닫기" className="-mr-1 shrink-0 p-1" style={{ color: SEA.mute }}>
-          <X size={17} />
+        {/* ★44x44. 예전 것은 25px 이라 CLAUDE.md 의 「터치 타겟 최소 44×44」를 어기고 있었다 —
+            현장에서 **장갑 끼고** 누른다(2026-09-05 사용자 지시). 바탕도 깔아 눈에 띄게 한다.
+            ★`touch-none` 인 머리줄 안에 있으므로 끌기와 섞이지 않게 pointerdown 을 여기서 멈춘다. */}
+        <button onClick={onClose} aria-label="닫기"
+          onPointerDown={e => e.stopPropagation()}
+          className="-mr-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-full"
+          style={{ color: SEA.ink2, background: SEA.tabTrack }}>
+          <X size={20} strokeWidth={2.6} />
         </button>
       </div>
 
