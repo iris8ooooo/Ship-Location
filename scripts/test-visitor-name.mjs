@@ -53,16 +53,18 @@ console.log('\n② 아무것도 없는 새 기기 — 한 번은 묻는다');
   eq(store.get('adminName'), '박철수', '★관리자 이름 칸에 쓴다 — 사본을 만들지 않는다');
 }
 
-console.log('\n③ 「나중에」 — 다시 묻지 않되 **관리자 이름을 지우지 않는다**');
+// ★닫는 버튼(「나중에」)은 2026-09-05 에 뺐다. 부르는 곳은 없지만 가드는 남아 있고,
+//  다시 닫는 버튼을 붙이는 날 이 함정을 또 밟게 되므로 시험은 그대로 둔다.
+console.log('\n③ 빈 이름으로 부르면 — **관리자 이름을 지우지 않는다** (가드)');
 {
   reset({ adminName: '김은호' });
-  setVisitorName('');                       // 「나중에」가 부르는 것
+  setVisitorName('');                       // 닫는 버튼이 부르던 것
   eq(getVisitorName(), '김은호', '★이름이 살아 있다 (지우면 이력이 이름 없이 남는다)');
   eq(nameAsked(), true, '다시 안 묻는다');
 }
 {
   reset();
-  setVisitorName('');                       // 이름 없는 사람이 「나중에」
+  setVisitorName('');                       // 이름 없는 사람이 그냥 닫은 경우
   eq(getVisitorName(), '', '이름은 없다');
   eq(nameAsked(), true, '그래도 다시 안 묻는다 (성가시면 아무도 안 적는다)');
   eq(store.has('adminName'), false, '빈 이름을 만들어 두지 않는다');
