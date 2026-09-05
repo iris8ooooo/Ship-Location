@@ -19,6 +19,8 @@ export function kstParts(ms: number): { y: number; m: number; d: number; hh: num
 export function kstDateKey(ms: number): string;
 export function kstYmd(ms: number): string;
 export function addDays(dateKey: string, n: number): string;
+export function normalizeServiceKey(key: string): string;
+export function serviceKeyShape(key: string): string;
 export function khoaTideUrl(serviceKey: string, dateYmd: string, code?: string): string;
 export function parseKhoaHighLow(json: unknown, expectDate: string): { date: string; station: { name: string; lat: number; lon: number }; tides: TideExtreme[] };
 export function buildTideDoc(days: { date: string; tides: TideExtreme[] }[], nowMs: number): TideDoc;
