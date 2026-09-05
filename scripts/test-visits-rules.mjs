@@ -82,6 +82,46 @@ await t('인증 없이 history 쓰기 — 그대로 통과',
   () => assertSucceeds(addDoc(collection(anon.firestore(), 'history'),
     { action: '이동', shipId: '8206', author: '자동수집', timestamp: Date.now() })));
 
+console.log('\n[6] 직원 명단 — 오너만 읽고 오너만 고친다 (이름이 밖으로 새면 안 된다)');
+await t('인증 없는 사람은 명단을 못 읽는다 ★이게 뚫리면 인원 명부가 공개된다',
+  () => assertFails(getDocs(collection(anon.firestore(), 'staff'))));
+await t('다른 구글 계정도 못 읽는다',
+  () => assertFails(getDocs(collection(other.firestore(), 'staff'))));
+await t('이메일이 같아도 **미인증**이면 못 읽는다',
+  () => assertFails(getDocs(collection(ownerUnv.firestore(), 'staff'))));
+await t('오너는 읽는다',
+  () => assertSucceeds(getDocs(collection(owner.firestore(), 'staff'))));
+
+await t('인증 없는 사람은 이름을 못 넣는다 ★뚫리면 「명단 밖」 표시가 무의미해진다',
+  () => assertFails(setDoc(doc(anon.firestore(), 'staff', '침입자'), { addedAt: serverTimestamp() })));
+await t('다른 계정도 못 넣는다',
+  () => assertFails(setDoc(doc(other.firestore(), 'staff', '침입자'), { addedAt: serverTimestamp() })));
+await t('오너는 넣는다',
+  () => assertSucceeds(setDoc(doc(owner.firestore(), 'staff', '김은호'), { addedAt: serverTimestamp() })));
+await t('오너가 같은 이름을 다시 넣어도 된다 (덮어쓰기 — 「+명단」을 두 번 눌러도 안 깨진다)',
+  () => assertSucceeds(setDoc(doc(owner.firestore(), 'staff', '김은호'), { addedAt: serverTimestamp() })));
+await t('오너는 뺀다',
+  () => assertSucceeds(deleteDoc(doc(owner.firestore(), 'staff', '김은호'))));
+await t('남은 못 뺀다',
+  () => assertFails(deleteDoc(doc(anon.firestore(), 'staff', '김은호'))));
+
+await t('연락처를 붙이면 거부된다 ★필요한 건 이름뿐이라는 약속을 규칙이 지킨다',
+  () => assertFails(setDoc(doc(owner.firestore(), 'staff', '홍길동'),
+    { addedAt: serverTimestamp(), phone: '010-0000-0000' })));
+await t('시각은 서버가 찍는다 — 클라이언트 시계는 거부',
+  () => assertFails(setDoc(doc(owner.firestore(), 'staff', '홍길동'), { addedAt: new Date() })));
+
+console.log('\n[7] ★명단은 아무도 막지 않는다 — 신입이 앱을 못 쓰게 되면 안 된다');
+await env.withSecurityRulesDisabled(async ctx => {
+  await setDoc(doc(ctx.firestore(), 'staff', '김은호'), { addedAt: new Date() });
+});
+await t('명단에 **없는** 이름으로도 접속 기록이 남는다 (이게 막히면 신입이 잘린다)',
+  () => assertSucceeds(addDoc(collection(anon.firestore(), 'visits'),
+    { device: 'dev-newcomer1234', name: '방금온사람', at: serverTimestamp() })));
+await t('명단에 있는 이름도 당연히 남는다',
+  () => assertSucceeds(addDoc(collection(anon.firestore(), 'visits'),
+    { device: 'dev-abcdefgh1234', name: '김은호', at: serverTimestamp() })));
+
 await env.cleanup();
 console.log(fail === 0 ? '\n전부 통과' : `\n${fail}건 실패`);
 process.exit(fail === 0 ? 0 : 1);

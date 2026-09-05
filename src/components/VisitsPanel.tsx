@@ -6,6 +6,12 @@
  *  것은 예의일 뿐 보안이 아니다. 규칙이 막으면 여기서는 `permission-denied` 가 오고,
  *  그걸 "로그인이 필요합니다" 로 바꿔 보여준다.
  *
+ * ★**직원 명단은 문지기가 아니라 눈이다** (2026-09-05 사용자 결정). 명단 밖 이름을
+ *  「명단 밖」으로 표시할 뿐, 아무도 막지 않는다 — 막으면 신입이 앱을 못 쓰고 오너는
+ *  그 사실을 모른다. 신입이면 그 자리에서 탭 한 번으로 명단에 넣는다.
+ *  ★명단 읽기가 막혀도(규칙 배포 전 등) **집계는 그대로 뜬다.** 곁다리 때문에 본체가
+ *  안 뜨는 것이 더 나쁘다 — 이 레포의 fail-open 원칙과 같다.
+ *
  * ★홈화면 앱(standalone)에서는 구글 **팝업 로그인이 막힌다.** 그래서 팝업이 실패하면
  *  리다이렉트로 물러난다 — 둘 중 하나는 통한다. 실패를 조용히 삼키지 않는다.
  */
@@ -14,14 +20,15 @@ import {
   GoogleAuthProvider, getRedirectResult, onAuthStateChanged,
   signInWithPopup, signInWithRedirect, type User,
 } from 'firebase/auth';
-import { X, RefreshCw } from 'lucide-react';
+import { X, RefreshCw, Plus, UserRoundPlus } from 'lucide-react';
 import { auth } from '../firebase';
 import { fetchVisitStats, type VisitStats } from '../lib/visits';
+import { addStaff, addStaffBulk, fetchStaff, parseNames, removeStaff } from '../lib/staff';
 
 type State =
   | { k: 'loading' }
   | { k: 'need-login'; why?: string; signedIn?: boolean }
-  | { k: 'ready'; stats: VisitStats }
+  | { k: 'ready'; stats: VisitStats; staff: string[] | null }
   | { k: 'error'; msg: string };
 
 export default function VisitsPanel({ onClose }: { onClose: () => void }) {
@@ -39,7 +46,12 @@ export default function VisitsPanel({ onClose }: { onClose: () => void }) {
   const load = useCallback(async () => {
     setState({ k: 'loading' });
     try {
-      setState({ k: 'ready', stats: await fetchVisitStats(14) });
+      const stats = await fetchVisitStats(14);
+      // ★명단은 **곁다리다.** 못 읽어도(규칙이 아직 배포 안 됐다든지) 집계는 띄운다.
+      //  곁다리 때문에 본체가 안 뜨는 것이 더 나쁘다.
+      let staff: string[] | null = null;
+      try { staff = await fetchStaff(); } catch { staff = null; }
+      setState({ k: 'ready', stats, staff });
     } catch (e: unknown) {
       const code = (e as { code?: string })?.code ?? '';
       // ★「로그인 안 함」과 「로그인은 했는데 주인이 아님」을 **갈라야 한다.**
@@ -125,15 +137,72 @@ export default function VisitsPanel({ onClose }: { onClose: () => void }) {
         </div>
       )}
 
-      {state.k === 'ready' && <Stats stats={state.stats} />}
+      {state.k === 'ready' && (
+        <Stats
+          stats={state.stats}
+          staff={state.staff}
+          onStaffChange={async () => {
+            try {
+              const next = await fetchStaff();       // ★먼저 받고 나서 넣는다 — updater 안에서는 await 를 못 쓴다
+              setState(p => (p.k === 'ready' ? { ...p, staff: next } : p));
+            } catch { /* 못 읽으면 그대로 둔다 */ }
+          }}
+        />
+      )}
     </div>
   );
 }
 
-function Stats({ stats }: { stats: VisitStats }) {
+function Stats({ stats, staff, onStaffChange }: {
+  stats: VisitStats;
+  staff: string[] | null;
+  onStaffChange: () => Promise<void>;
+}) {
   const { today, days, totalPeople, truncated } = stats;
   const max = Math.max(1, ...days.map(d => d.people));
   const DOW = ['일', '월', '화', '수', '목', '금', '토'];
+  const known = staff ? new Set(staff) : null;
+
+  const [paste, setPaste] = useState('');
+  const [msg, setMsg] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  /** 명단 밖 이름 하나를 명단에 넣는다. 신입이 이 길로 들어온다. */
+  const add = async (name: string) => { await addStaff(name); await onStaffChange(); };
+
+  /** 붙여넣은 덩어리를 한 번에 넣는다. 처음 명단을 채울 때 쓴다. */
+  const bulk = async () => {
+    const names = parseNames(paste);
+    if (names.length === 0) { setMsg('이름을 못 찾았습니다. 줄바꿈이나 쉼표로 구분해 주십시오.'); return; }
+    setSaving(true);
+    try {
+      const { added, failed } = await addStaffBulk(names);
+      // ★실패를 삼키지 않는다. "넣었는데 왜 안 뜨지" 가 이 레포가 반복해서 당한 모양이다.
+      setMsg(failed.length ? `${added}명 넣었습니다. 실패 ${failed.length}명: ${failed.join(', ')}`
+                           : `${added}명 넣었습니다.`);
+      setPaste('');
+      await onStaffChange();
+    } catch (e: unknown) {
+      setMsg(`넣지 못했습니다 — ${(e as { code?: string })?.code ?? e}`);
+    } finally { setSaving(false); }
+  };
+
+  /** 이름 한 덩어리. 명단 밖이면 배지와 「+」를 단다. */
+  const Name = ({ n }: { n: string }) => {
+    if (!known || known.has(n)) return <span className="font-medium">{n}</span>;
+    return (
+      <span className="inline-flex items-center gap-0.5 align-middle">
+        <span className="font-medium text-amber-700">{n}</span>
+        <button
+          onClick={() => add(n)}
+          title={`${n} 을(를) 명단에 추가`}
+          className="inline-flex items-center rounded bg-amber-100 px-1 py-px text-[10px] font-bold text-amber-800 hover:bg-amber-200"
+        >
+          <Plus size={10} /> 명단
+        </button>
+      </span>
+    );
+  };
 
   return (
     <div className="flex flex-col gap-3">
@@ -145,7 +214,9 @@ function Stats({ stats }: { stats: VisitStats }) {
           <span className="text-[11px] text-blue-700">명</span>
         </div>
         <div className="mt-1 text-[12px] text-gray-700 leading-relaxed">
-          {today.names.length > 0 && <span className="font-bold">{today.names.join(' · ')}</span>}
+          {today.names.map((n, i) => (
+            <span key={n}>{i > 0 && <span className="text-gray-400"> · </span>}<Name n={n} /></span>
+          ))}
           {today.names.length > 0 && today.anon > 0 && <span className="text-gray-400"> · </span>}
           {today.anon > 0 && <span className="text-gray-500">이름 미등록 {today.anon}명</span>}
           {today.people === 0 && <span className="text-gray-400">아직 아무도 안 열었습니다</span>}
@@ -192,7 +263,9 @@ function Stats({ stats }: { stats: VisitStats }) {
                   {Number(m)}/{Number(dd)}
                 </span>
                 <span className="min-w-0 flex-1 text-[12px] text-gray-700">
-                  {d.names.join(' · ')}
+                  {d.names.map((n, i) => (
+                    <span key={n}>{i > 0 && <span className="text-gray-400"> · </span>}<Name n={n} /></span>
+                  ))}
                   {d.names.length > 0 && d.anon > 0 && <span className="text-gray-400"> · </span>}
                   {d.anon > 0 && <span className="text-gray-400">이름 미등록 {d.anon}</span>}
                 </span>
@@ -201,6 +274,54 @@ function Stats({ stats }: { stats: VisitStats }) {
           })}
         </div>
       </div>
+
+      {/* 직원 명단 — ★문지기가 아니라 눈이다. 아무도 막지 않는다. */}
+      {staff !== null && (
+        <details className="rounded-lg border border-gray-200 bg-gray-50/70">
+          <summary className="cursor-pointer px-3 py-2 text-[11px] font-bold text-gray-600">
+            직원 명단 {staff.length}명
+            <span className="ml-1 font-normal text-gray-400">— 명단 밖 이름을 알아보려고 둡니다. 아무도 막지 않습니다.</span>
+          </summary>
+          <div className="flex flex-col gap-2 px-3 pb-3">
+            <div className="flex flex-wrap gap-1">
+              {staff.map(n => (
+                <span key={n} className="inline-flex items-center gap-1 rounded border border-gray-200 bg-white py-0.5 pl-2 pr-1 text-[12px] text-gray-700">
+                  {n}
+                  <button
+                    onClick={async () => { await removeStaff(n); await onStaffChange(); }}
+                    aria-label={`${n} 명단에서 빼기`}
+                    className="text-gray-300 hover:text-red-500"
+                  >
+                    <X size={11} />
+                  </button>
+                </span>
+              ))}
+              {staff.length === 0 && (
+                <span className="text-[12px] text-gray-400">아직 비어 있습니다 — 아래에 명단을 붙여넣으십시오.</span>
+              )}
+            </div>
+            <textarea
+              value={paste}
+              onChange={e => setPaste(e.target.value)}
+              rows={3}
+              placeholder="이름을 줄바꿈이나 쉼표로 구분해 붙여넣으십시오"
+              className="w-full resize-y rounded-lg border-2 border-gray-200 px-2 py-1.5 text-[13px] text-gray-800 focus:border-blue-500 focus:outline-none"
+            />
+            <button
+              onClick={bulk}
+              disabled={saving || !paste.trim()}
+              className="inline-flex items-center justify-center gap-1 rounded-lg bg-gray-800 py-2 text-[13px] font-bold text-white disabled:opacity-40 hover:bg-gray-900"
+            >
+              <UserRoundPlus size={14} /> {saving ? '넣는 중…' : '명단에 넣기'}
+            </button>
+            {msg && <p className="text-[11px] text-gray-600 break-all">{msg}</p>}
+            <p className="text-[11px] text-gray-400 leading-relaxed">
+              이름은 <b>파이어스토어에만</b> 저장되고 사장님만 읽습니다 — 앱에도 코드에도 들어가지 않습니다.
+              연락처·사번·생년월일은 넣지 마십시오. 필요한 것은 이름뿐입니다.
+            </p>
+          </div>
+        </details>
+      )}
 
       <p className="text-[11px] text-gray-400 leading-relaxed">
         기간 전체 {totalPeople}대 · 하루에 한 번만 셉니다(새로고침은 안 셉니다).
