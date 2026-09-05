@@ -23,6 +23,7 @@ import {
 import { X, RefreshCw, Plus, UserRoundPlus } from 'lucide-react';
 import { auth } from '../firebase';
 import { fetchVisitStats, type VisitStats } from '../lib/visits';
+import { useDragToClose } from './useDragToClose';
 import { addStaff, addStaffBulk, fetchStaff, parseNames, removeStaff } from '../lib/staff';
 
 type State =
@@ -32,6 +33,8 @@ type State =
   | { k: 'error'; msg: string };
 
 export default function VisitsPanel({ onClose }: { onClose: () => void }) {
+  // 떠 있는 것은 **한 가지 방법으로** 닫힌다 — 조석·바람 시트·호선 카드와 같은 훅을 쓴다.
+  const drag = useDragToClose(onClose);
   const [state, setState] = useState<State>({ k: 'loading' });
   const [user, setUser] = useState<User | null>(null);
   const [busy, setBusy] = useState(false);
@@ -85,26 +88,43 @@ export default function VisitsPanel({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <div className="flex flex-col gap-2.5 text-[13px]">
-      <div className="flex items-center gap-2">
+    /* ★카드 표면을 **이 컴포넌트가 직접 그린다**(SeaSheet 과 같은 이유). 끌어서 닫으려면
+       움직일 요소에 ref 가 붙어야 하는데, 표면을 App.tsx 래퍼가 갖고 있으면 손잡이는
+       여기 있고 움직이는 것은 저기 있게 된다. */
+    <div
+      ref={drag.ref}
+      className="flex flex-col gap-2.5 rounded-2xl border border-gray-200 bg-white/95 pb-3 text-[13px] shadow-xl backdrop-blur"
+    >
+      {/* 손잡이 — 여기와 아래 머리줄을 아래로 끌면 닫힌다.
+          ★아래 목록·명단 칸에는 **걸지 않는다** — 제 스크롤이 있어 훑으려다 닫힌다. */}
+      <div {...drag.handlers} className="flex touch-none cursor-grab justify-center pb-0.5 pt-2 active:cursor-grabbing">
+        <span className="h-1 w-10 rounded-full bg-gray-300" aria-hidden />
+      </div>
+      <div {...drag.handlers} className="-mt-1.5 flex touch-none items-center gap-2 px-4">
         <h4 className="shrink-0 font-bold text-gray-800 text-sm">접속 집계</h4>
         <span className="min-w-0 flex-1 truncate text-[11px] text-gray-500">
           {user?.email ? user.email : '오너만 볼 수 있습니다'}
         </span>
+        {/* ★`touch-none` 인 머리줄 안이라 끌기와 섞이지 않게 pointerdown 을 여기서 멈춘다. */}
         {state.k === 'ready' && (
-          <button onClick={load} aria-label="새로고침" className="shrink-0 p-1 text-gray-400 hover:text-gray-700">
-            <RefreshCw size={15} />
+          <button onClick={load} aria-label="새로고침"
+            onPointerDown={e => e.stopPropagation()}
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-700">
+            <RefreshCw size={18} />
           </button>
         )}
-        <button onClick={onClose} aria-label="닫기" className="shrink-0 p-1 text-gray-400 hover:text-gray-700">
-          <X size={16} />
+        {/* ★44x44 — 현장에서 장갑 끼고 누른다(2026-09-05 사용자 지시). */}
+        <button onClick={onClose} aria-label="닫기"
+          onPointerDown={e => e.stopPropagation()}
+          className="-mr-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-800">
+          <X size={20} strokeWidth={2.6} />
         </button>
       </div>
 
-      {state.k === 'loading' && <div className="text-gray-400">불러오는 중…</div>}
+      {state.k === 'loading' && <div className="px-4 text-gray-400">불러오는 중…</div>}
 
       {state.k === 'need-login' && (
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-2 px-4">
           {state.signedIn ? (
             <p className="text-gray-600 leading-relaxed">
               <b className="break-all">{user?.email ?? '이 계정'}</b> 으로는 접속기록을 볼 수 없습니다.
@@ -129,7 +149,7 @@ export default function VisitsPanel({ onClose }: { onClose: () => void }) {
       )}
 
       {state.k === 'error' && (
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-2 px-4">
           <p className="text-red-600 break-all">불러오지 못했습니다 — {state.msg}</p>
           <button onClick={load} className="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-2 rounded-lg">
             다시 시도
@@ -205,7 +225,7 @@ function Stats({ stats, staff, onStaffChange }: {
   };
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-3 px-4">
       {/* 오늘 — 이 화면의 주인공이라 크게 */}
       <div className="rounded-lg bg-blue-50 border border-blue-100 px-3 py-2.5">
         <div className="flex items-baseline gap-2">

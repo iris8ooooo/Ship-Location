@@ -77,9 +77,26 @@ console.log('\n④ 둘째 칸을 쓰던 하루치 사용자 — 그대로 이어
   eq(nameAsked(), true, '다시 묻지 않는다');
 }
 {
+  // ★★**여기가 바뀌었다** (2026-09-05, 사용자 질문 「이름 미등록 8명 … 이름을 입력 안한건가?」).
+  //  빈 `visitorName` 은 없어진 「나중에」 버튼을 누른 흔적이다. 예전에는 그것을
+  //  「물어봤다」로 쳐서 **다시는 안 물었고**, 그 기기는 영영 「이름 미등록」으로 남았다.
+  //  사용자가 그 버튼을 없앤 뜻(「이름을 적어야 사라진다」)과 정반대라 한 번 더 묻는다.
   reset({ visitorName: '' });               // 옛 「나중에」
   eq(getVisitorName(), '', '이름 없음');
-  eq(nameAsked(), true, '이미 물어본 사람이다');
+  eq(nameAsked(), false, '★없어진 「나중에」로 굳은 기기는 한 번 더 묻는다');
+}
+{
+  // 옛 표시(`visitorAsked`)만 남은 기기도 같다 — 19:17~19:40 판의 「나중에」다.
+  reset({ visitorAsked: '1' });
+  eq(nameAsked(), false, '★옛 「물어봤다」 표시는 이제 안 세운다');
+  reset({ visitorAsked2: '1' });
+  eq(nameAsked(), true, '지금 표시가 있으면 다시 안 묻는다');
+}
+{
+  // ★그래도 **이름을 적은 사람에게는 절대 다시 묻지 않는다** — 다시 묻는 대상이
+  //  「나중에」 누른 기기로만 좁혀지는 근거가 이 줄이다.
+  reset({ adminName: '김은호', visitorAsked: '1' });
+  eq(nameAsked(), true, '★이름이 있으면 표시를 올려도 다시 안 묻는다');
 }
 {
   reset({ adminName: '김은호', visitorName: '오타' });

@@ -21,7 +21,20 @@ export const NAME_MAX = 20;
 
 const NAME_KEY = 'adminName';         // ★한 사람의 이름은 여기 하나
 const OLD_KEY = 'visitorName';        // 2026-09-05 하루 동안만 쓰던 둘째 칸 (읽기만 — 이사용)
-const ASKED_KEY = 'visitorAsked';     // 물어봤다는 표시 (이름 자체와 따로 둔다)
+/**
+ * 물어봤다는 표시 (이름 자체와 따로 둔다).
+ *
+ * ★★**한 번 올렸다**(`visitorAsked` → `visitorAsked2`, 2026-09-05).
+ *  17:49~19:40 사이의 카드에는 **「나중에」 버튼**이 있었고 그것은 `setVisitorName('')` 을
+ *  불렀다 — 이름 없이 「물어봤다」만 찍힌다. 그 뒤 사용자가 그 버튼을 **없애서**
+ *  (「이름을 적어야 사라진다」) 그 사이에 누른 기기는 **다시는 묻지 않는 상태로 굳었다.**
+ *  없어진 버튼 때문에 영영 「이름 미등록」으로 남는 것은 사용자가 정한 뜻과 반대다.
+ * ★올려도 **이름을 적은 사람은 다시 안 묻는다** — `nameAsked()` 가 이름부터 보기 때문이다.
+ *  즉 다시 묻는 대상은 정확히 「물어봤는데 이름이 없는」 기기, 곧 그 버튼을 누른 기기뿐이다.
+ * ★트레이드오프: 「기기당 딱 한 번만 묻는다」를 그 기기들에 한해 두 번으로 만든다.
+ *  다음에 또 올리지 말 것 — 이건 없어진 버튼을 되돌리는 일회성이다.
+ */
+const ASKED_KEY = 'visitorAsked2';
 
 /** 저장소가 막힌 브라우저(사파리 비공개)에서도 앱은 그대로 돈다. */
 function get(k: string): string | null {
@@ -56,5 +69,8 @@ function storageOk(): boolean {
 export function nameAsked(): boolean {
   if (!storageOk()) return true;
   if (getVisitorName()) return true;
-  return get(ASKED_KEY) !== null || get(OLD_KEY) !== null;
+  // ★`OLD_KEY` 는 여기서 **안 본다.** 그 칸이 빈 값으로 남아 있다는 것은 옛 「나중에」를
+  //  눌렀다는 뜻이라(이름을 적었으면 위 `getVisitorName()` 에서 이미 걸린다), 그걸
+  //  「물어봤다」로 치면 그 기기는 영영 안 묻게 된다 — 위 ASKED_KEY 주석과 같은 이유다.
+  return get(ASKED_KEY) !== null;
 }

@@ -56,6 +56,17 @@ function deviceId(): string {
  *  (단, 실패를 삼키는 대신 콘솔에는 남긴다.)
  */
 export async function recordVisit(force = false): Promise<void> {
+  // ★★**자동화 브라우저는 세지 않는다** (2026-09-05 실측으로 잡았다).
+  //  `tide-check` 의 prod 잡이 프로덕션을 **매번 새 브라우저 프로필로** 연다 →
+  //  기기 id 가 매번 새로 생기고 → 이름 없는 접속이 한 줄씩 쌓인다.
+  //  실측: 하루치 Cloud Run 요청 23건 중 **6건이 봇·자동화**였고, 그것이 그대로
+  //  「이름 미등록 N명」으로 사용자에게 보였다. 사용자가 「이름을 입력 안한건가?」로
+  //  물어본 그 숫자다 — **사람이 아니라 내 점검이었다.**
+  //  `navigator.webdriver` 는 Playwright·Puppeteer·Selenium 이 전부 켜는 표준 신호다.
+  //  (Cloud Run 쪽 집계는 User-Agent 로 이미 봇을 걸러내고 있었다. 두 곳이 같은 질문에
+  //   다르게 답하고 있었던 것이다.)
+  if (navigator.webdriver) return;
+
   const device = deviceId();
   if (!device) return;
   const today = kstDay(new Date());

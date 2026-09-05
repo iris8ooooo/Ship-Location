@@ -51,7 +51,12 @@ jobs:
         env:
           TOKEN: ${{ steps.auth.outputs.access_token }}
           DAYS: ${{ inputs.days }}
-        run: node scripts/audit-visits.mjs 2>&1 | tee out.log
+        run: |
+          # ★`| tee` 는 **파이프 끝의 종료코드**를 쓴다. 그대로 두면 스크립트가 exit 1 로
+          #  죽어도 잡이 초록불이다 — 실제로 403 이 초록으로 지나갔다(run 2).
+          #  아무 일도 안 하고 초록불이면 거짓말이다.
+          set -o pipefail
+          node scripts/audit-visits.mjs 2>&1 | tee out.log
 
       - name: 요약
         if: always()
