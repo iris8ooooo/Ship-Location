@@ -17,6 +17,10 @@ on:
         description: '프로덕션(Cloud Run) 실제 화면도 찍는다 — 진짜 파이어스토어·진짜 시각'
         type: boolean
         default: false
+      b64:
+        description: '그 화면을 로그에 base64 로도 찍는다 (아티팩트를 못 받는 세션용)'
+        type: boolean
+        default: false
   pull_request:
     paths:
       - 'src/lib/tide.mjs'
@@ -181,21 +185,27 @@ jobs:
           import { chromium } from 'playwright';
           const URL = 'https://hd-ship-location-238928524992.us-west1.run.app/';
           const b = await chromium.launch();
-          const ctx = await b.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2,
+          // ★배치를 확인하는 용도라 dsf 1 이면 충분하다. 2 로 찍으면 PNG 가 커져
+          //  로그로 내보낼 수가 없다(아래 b64 스텝).
+          const ctx = await b.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1,
             isMobile: true, hasTouch: true, locale: 'ko-KR', timezoneId: 'Asia/Seoul' });
           const page = await ctx.newPage();
+          const shot = async (name) => {
+            await page.screenshot({ path: `out/prod/${name}.png` });
+            await page.screenshot({ path: `out/prod/${name}.jpg`, type: 'jpeg', quality: 62 });
+          };
           await page.goto(URL, { waitUntil: 'domcontentloaded' });
           await page.waitForTimeout(6000);                 // 파이어스토어 스냅샷을 기다린다
-          await page.screenshot({ path: 'out/prod/01-map.png' });
+          await shot('01-map');
           // ★`exact: true` 가 필요하다. 새 칩의 라벨이 「조석·바람 **자세히 보기**」라
           //  느슨하게 잡으면 FAB 과 칩 **둘 다** 걸려 strict mode 로 죽는다(run 11 에서 실제로).
           await page.getByLabel('조석·바람', { exact: true }).click({ timeout: 30000 });
           await page.waitForTimeout(3000);
-          await page.screenshot({ path: 'out/prod/02-open.png' });
+          await shot('02-open');
           // 조석 탭을 확실히 고른 뒤 한 장 더 — 기본 탭이 무엇이든 조석을 본다
           await page.getByRole('button', { name: '조석', exact: true }).click({ timeout: 10000 }).catch(() => {});
           await page.waitForTimeout(1500);
-          await page.screenshot({ path: 'out/prod/03-tide.png' });
+          await shot('03-tide');
           // 시트든 옛 패널이든 열린 것을 글자로 읽는다 — 배포 전후 어느 쪽이어도 뭔가 남는다
           const sheet = page.locator('[data-sea-sheet]');
           const txt = await (await sheet.count()
@@ -212,6 +222,19 @@ jobs:
             cat out/prod.log
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+      # ★아티팩트를 **못 받는 세션**이 있다. 개발 샌드박스는 프록시가 blob 저장소를 막아,
+      #  스크린샷을 올려 둬도 열어 볼 수가 없다 — 볼 수 없는 스크린샷은 그 세션에 없는 것과 같다.
+      #  그래서 로그로도 내보낸다. 옵트인인 이유: 켜면 로그가 수십 KB 늘어난다.
+      - name: 화면을 로그에 base64 로도 (b64 입력)
+        if: inputs.b64
+        run: |
+          for f in out/prod/*.jpg; do
+            [ -f "$f" ] || continue
+            echo "B64FILE $(basename "$f") $(wc -c < "$f")bytes"
+            base64 -w 3800 "$f"
+            echo "B64END"
+          done
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
