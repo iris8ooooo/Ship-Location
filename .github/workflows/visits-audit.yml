@@ -55,4 +55,10 @@ jobs:
 
       - name: 요약
         if: always()
-        run: { echo '## 접속 기록 감사'; echo '```'; cat out.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+        run: |
+          {
+            echo '## 접속 기록 감사'
+            echo '```'
+            cat out.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
