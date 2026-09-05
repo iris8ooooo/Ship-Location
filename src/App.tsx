@@ -67,6 +67,7 @@ import VisitsPanel from './components/VisitsPanel';
 import { recordVisit, recordVisitWithName, setVisitorName, nameAsked, NAME_MAX } from './lib/visits';
 import SeaChip from './components/SeaChip';
 import SeaSheet from './components/SeaSheet';
+import { useDragToClose } from './components/useDragToClose';
 
 
 interface ShipData {
@@ -1292,12 +1293,13 @@ export default function App() {
 
 
   const handleBackgroundPointerDown = (e: ReactPointerEvent) => {
-    if (!(e.target as HTMLElement).closest('.ship') && !(e.target as HTMLElement).closest('.zone')) {
-      setSelectedShipId(null);
-      setSelectedZoneId(null);
-    }
     // 지도를 **톡 친 것**인지 재기 시작한다 (아래 handleMapPointerUp 이 판정한다).
-    mapTapRef.current = e.isPrimary ? { x: e.clientX, y: e.clientY, t: Date.now() } : null;
+    // ★예전에는 여기서 곧바로 선택을 풀었다. 그러면 **지도를 밀기 시작하는 순간** 호선 카드가
+    //  닫혀, 배가 어디 있는지 보려고 지도를 미는 것 자체가 안 됐다. 판정은 놓을 때 한다.
+    const el = e.target as HTMLElement;
+    mapTapRef.current = e.isPrimary
+      ? { x: e.clientX, y: e.clientY, t: Date.now(), onMarker: !!(el.closest('.ship') || el.closest('.zone')) }
+      : null;
   };
 
   /**
@@ -1306,15 +1308,22 @@ export default function App() {
    * ★**민 것·꾹 누른 것과 갈라야 한다.** 지도는 한 손가락 밀기로 팬하고, 배는 600ms 꾹
    *  눌러야 잡힌다 — 그 둘을 닫기로 오인하면 지도를 볼 수가 없다. 그래서 배 끌기와 **같은
    *  잣대**를 쓴다: 8px 안, 500ms 안일 때만 「탭」이다.
+   * ★호선 카드(공정창)도 같이 닫는다(2026-09-05 사용자 지시) — 화면에 떠 있는 것을 닫는
+   *  방법이 둘로 갈리면 사용자가 둘을 다 외워야 한다.
    * ★두 손가락(핀치)이 닿는 순간 취소한다. 줌아웃하다 시트가 닫히면 황당하다.
    */
   const handleMapPointerUp = (e: ReactPointerEvent) => {
     const start = mapTapRef.current;
     mapTapRef.current = null;
-    if (!start || !openPanel) return;
+    if (!start) return;
     if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > 8) return;
     if (Date.now() - start.t > 500) return;
-    setOpenPanel(null);
+    // 톡 친 것이 맞다 — 떠 있는 것을 닫는다. 조석·바람 시트와 호선 카드가 **같은 잣대**를 쓴다.
+    if (openPanel) setOpenPanel(null);
+    if (!start.onMarker) {
+      setSelectedShipId(null);
+      setSelectedZoneId(null);
+    }
   };
 
   /** 이름을 받고 관리자로 들어간다. 이름을 받으려던 이유가 그것이다. */
@@ -1329,10 +1338,12 @@ export default function App() {
   };
 
   /** 지도를 「톡 친」 것인지 재는 값. 시트 닫기 판정에만 쓴다. */
-  const mapTapRef = useRef<{ x: number; y: number; t: number } | null>(null);
+  const mapTapRef = useRef<{ x: number; y: number; t: number; onMarker: boolean } | null>(null);
 
   /** 뷰어에서 호선 카드가 떠 있는가. 오른쪽 FAB 열이 이걸 보고 위로 비킨다. */
   const shipCardOpen = appMode !== 'admin' && !!selectedShipId && !!ships[selectedShipId];
+  /** 호선 카드도 조석·바람 시트와 **같은 방법으로** 닫힌다 — 끌어내리기 · 지도 톡 치기 · 버튼. */
+  const cardDrag = useDragToClose(() => setSelectedShipId(null));
 
   if (showNamePrompt) {
     return (
@@ -1735,10 +1746,17 @@ export default function App() {
           이름만 같고 다른 것이다(#72 에서 헷갈려 넣었다가 #73 에서 되돌렸다). */}
       {shipCardOpen && (
         <div
+          ref={cardDrag.ref}
           style={{ bottom: 'calc(3rem + var(--dock-h, 4.5rem) + var(--sheet-h, 0px) + 1rem + env(safe-area-inset-bottom))' }}
-          className="fixed left-1/2 -translate-x-1/2 z-40 bg-white/95 backdrop-blur rounded-2xl shadow-xl border border-gray-200 px-4 py-2.5 w-[min(92vw,380px)]"
+          className="fixed left-1/2 -translate-x-1/2 z-40 bg-white/95 backdrop-blur rounded-2xl shadow-xl border border-gray-200 px-4 pb-2.5 pt-1.5 w-[min(92vw,380px)]"
         >
-          <div className="flex items-center gap-3">
+          {/* 손잡이 — 여기와 아래 머리줄을 아래로 끌면 닫힌다. 조석·바람 시트와 같은 것을 쓴다.
+              ★공정 목록은 제 스크롤이 있으므로 **거기에는 끌기를 걸지 않는다** — 걸면
+               목록을 훑으려다 카드가 닫힌다. */}
+          <div {...cardDrag.handlers} className="flex touch-none cursor-grab justify-center pb-1 active:cursor-grabbing">
+            <span className="h-1 w-10 rounded-full bg-gray-300" aria-hidden />
+          </div>
+          <div {...cardDrag.handlers} className="flex touch-none items-center gap-3">
             <div className="min-w-0 flex-1">
               <div className="font-black text-gray-900 leading-tight">{selectedShipId}</div>
               {(ships[selectedShipId] as any).berth && (
@@ -1747,12 +1765,16 @@ export default function App() {
                 </div>
               )}
             </div>
+            {/* ★44x44. 예전 것은 32px 이라 「터치 타겟 최소 44×44」를 어기고 있었다 —
+                현장에서 **장갑 끼고** 누른다(조석·바람 시트와 같은 이유).
+                ★끌기 줄 안에 있으므로 pointerdown 을 여기서 멈춘다. */}
             <button
               onClick={() => setSelectedShipId(null)}
+              onPointerDown={e => e.stopPropagation()}
               aria-label="닫기"
-              className="shrink-0 w-8 h-8 rounded-full text-gray-400 hover:bg-gray-100 flex items-center justify-center"
+              className="-mr-1.5 shrink-0 w-11 h-11 rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 flex items-center justify-center"
             >
-              <X size={18} />
+              <X size={20} strokeWidth={2.6} />
             </button>
           </div>
           {/* 많으면 이 안에서 스크롤한다. 45vh 는 아이폰SE(667)에서도 위 ⓘ 버튼을
