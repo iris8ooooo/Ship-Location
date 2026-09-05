@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState, PointerEvent as ReactPointerEvent } from 'react';
 import { collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, addDoc, query, orderBy, limit } from 'firebase/firestore';
 import { parseListText, planMoves, BERTH_LABEL } from './lib/safetyone-match.mjs';
+import { tideInfoFrom, tideFreshness, TIDE_DOC, TIDE_STATION, type TideDoc } from './lib/tide.mjs';
 import { fetchVesselPlan, dateLabel, ddayLabel, type VesselPlan } from './lib/vessel-plan';
 import { fetchRoster, specIsDF, OPEN_ROSTER, type Roster } from './lib/vessel-roster';
 import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User } from 'firebase/auth';
@@ -80,6 +81,9 @@ interface ZoneData {
   isLocked?: boolean;
 }
 
+/** 조석 화면 모양. 값은 국립해양조사원 예보(meta/tide)에서 오고, 만드는 것은 src/lib/tide.mjs 의 tideInfoFrom 이다.
+ *  ★예전에는 여기서 사인 공식으로 지어냈다(2026-09-05 에 걸어냄). 다시 계산으로 채우지 말 것 —
+ *   안벽 접안·도커 주수·해상크레인이 이 숫자를 본다. 예보가 없으믄 「없다」고 그린다. */
 interface TideInfo {
   dateStr: string;
   lunarStr: string;
@@ -201,7 +205,12 @@ export default function App() {
   const [bannerOpen, setBannerOpen] = useState(false);
   const [infoTab, setInfoTab] = useState<'tide' | 'wind'>('tide');
   const [windData, setWindData] = useState<{speed: number, direction: string, degrees: number, time: string, hourly: { speeds: number[] }} | null>(null);
-  const [tideData, setTideData] = useState<TideInfo | null>(null);
+  /** meta/tide 문서. undefined = 아직 안 왕다 · null = 문서가 없다(한 번도 수신 안 됨). */
+  const [tideDoc, setTideDoc] = useState<TideDoc | null | undefined>(undefined);
+  /** 진행 상태(밀물/썰물)가 바뀝게 1분마다 갱신하는 시계. */
+  const [tideNow, setTideNow] = useState(() => Date.now());
+  const tideData: TideInfo | null = tideInfoFrom(tideDoc, tideNow);
+  const tideFresh = tideFreshness(tideDoc, tideNow);
   
   const containerRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -601,64 +610,15 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
+  // 조석예보 — 깃허브 액션(sync-tide.yml)이 국립해양조사원에서 받아 meta/tide 에 써 둔 것을 읽는다.
+  // ★앱이 KHOA 를 직접 부르지 않는다(공개 레포라 키가 샐다 · CORS · 하루 한 번이면 되는 값). 이유는 tide.mjs 머리에.
+  // ★못 읽으면 null — 지어낸 값으로 채우지 않고 화면이 「예보 없음」을 그린다.
   useEffect(() => {
-    const generateTideData = (): TideInfo => {
-      const now = new Date();
-      const baseDate = new Date('2024-01-11T00:00:00Z'); // Approx new moon
-      const daysSince = Math.floor((now.getTime() - baseDate.getTime()) / (1000 * 60 * 60 * 24));
-      const lunarAge = daysSince % 29.53;
-      const lunarDay = Math.floor(lunarAge) + 1;
-      
-      const shiftMinutes = Math.floor(lunarAge * 50);
-      
-      const formatTime = (baseMin: number) => {
-        const totalMin = (baseMin + shiftMinutes) % (24 * 60);
-        const h = Math.floor(totalMin / 60);
-        const m = totalMin % 60;
-        return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
-      };
-
-      const high1 = 2 * 60;
-      const low1 = 8 * 60 + 12;
-      const high2 = 14 * 60 + 24;
-      const low2 = 20 * 60 + 36;
-
-      const tideNames = ["사리", "1물", "2물", "3물", "4물", "5물", "6물", "7물", "조금", "무시", "1물", "2물", "3물", "4물", "5물", "6물", "7물", "8물", "9물", "10물", "11물", "12물", "13물", "14물", "사리", "1물", "2물", "3물", "4물", "5물"];
-      const tideName = tideNames[lunarDay % 30] || "사리";
-
-      const heightVariation = Math.cos((lunarAge / 29.53) * Math.PI * 2) * 100;
-
-      let tides = [
-        { type: 'High' as const, time: formatTime(high1), height: Math.floor(380 + heightVariation) },
-        { type: 'Low' as const, time: formatTime(low1), height: Math.floor(120 - heightVariation / 2) },
-        { type: 'High' as const, time: formatTime(high2), height: Math.floor(390 + heightVariation) },
-        { type: 'Low' as const, time: formatTime(low2), height: Math.floor(110 - heightVariation / 2) },
-      ].sort((a, b) => a.time.localeCompare(b.time));
-
-      const currentMin = now.getHours() * 60 + now.getMinutes();
-      let status = "밀물 진행중";
-      for (let i = 0; i < tides.length; i++) {
-        const [h, m] = tides[i].time.split(':').map(Number);
-        const tideMin = h * 60 + m;
-        if (currentMin < tideMin) {
-          status = tides[i].type === 'High' ? "밀물 진행중" : "썰물 진행중";
-          break;
-        }
-      }
-
-      return {
-        dateStr: `${now.getMonth() + 1}월 ${now.getDate()}일`,
-        lunarStr: `음력 ${lunarDay}일 ${tideName}`,
-        tides,
-        status
-      };
-    };
-
-    setTideData(generateTideData());
-    const interval = setInterval(() => {
-      setTideData(generateTideData());
-    }, 60 * 1000); // Update every minute to keep status fresh
-    return () => clearInterval(interval);
+    const unsub = onSnapshot(doc(db, TIDE_DOC.collection, TIDE_DOC.id),
+      snap => setTideDoc(snap.exists() ? (snap.data() as TideDoc) : null),
+      () => setTideDoc(null));
+    const interval = setInterval(() => setTideNow(Date.now()), 60 * 1000);   // 밀물/썰물 상태만 1분마다
+    return () => { unsub(); clearInterval(interval); };
   }, []);
 
   useEffect(() => {
@@ -1526,10 +1486,33 @@ export default function App() {
               🌊 조석표
             </button>
           </div>
-          {infoTab === 'tide' ? null : (
+          {infoTab === 'tide' ? (
+            // 어디서 온 값이고 언제 받은 것인지. 수신이 주기의 1.5배를 넘으믄 붉게 — "3일째 그대로" 와 "수집이 죽음" 을 가른다.
+            tideFresh && <span className={`text-[10px] ${tideFresh.stale ? 'text-red-500 font-bold' : 'text-gray-500'}`}>
+              해양조사원 {TIDE_STATION.name} · {tideFresh.text}{tideFresh.stale ? ' · 갱신 안 됨' : ''}
+            </span>
+          ) : (
             <span className="text-[10px] text-gray-500">{windData ? `${windData.time} 기준` : '업데이트 중...'}</span>
           )}
         </div>
+
+        {/* Tide Tab — 예보가 없으면 없다고 말한다. 사인 공식 폴백은 없다. */}
+        {infoTab === 'tide' && !tideData && (
+          <div className="mt-1 flex flex-col items-center justify-center gap-0.5 h-24 w-full bg-gray-50 rounded-lg border border-gray-200 px-3 text-center">
+            {tideDoc === undefined ? (
+              <span className="text-sm text-gray-400">조석예보를 불러오는 중...</span>
+            ) : (
+              <>
+                <span className="text-sm font-bold text-gray-600">조석예보 없음</span>
+                <span className="text-[10px] text-gray-500">
+                  {tideDoc === null
+                    ? '국립해양조사원 예보를 아직 한 번도 받지 못했다'
+                    : `오늘치가 없다 · 마지막 수신 ${tideFresh?.text ?? '?'}`}
+                </span>
+              </>
+            )}
+          </div>
+        )}
 
         {/* Tide Tab (Compact Design) */}
         {infoTab === 'tide' && tideData && (
