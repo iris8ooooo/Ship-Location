@@ -152,6 +152,34 @@ function usePublishedHeight(name: string) {
   return ref;
 }
 
+/**
+ * 위쪽에 뜨는 것의 **아래끝**(px)을 CSS 변수로 내려준다 — `usePublishedHeight` 의 짝.
+ *
+ * ★그쪽은 「아래에 더 붙었나」를 보고 top-anchored 요소를 **0 으로** 낸다. 이름 카드는
+ *  위에 붙으므로 그 훅으로는 잴 수가 없다. 그렇다고 높이를 박으면 안 된다 — 카드 글귀가
+ *  좁은 폰에서 두 줄로 접혀 높이가 기기마다 다르다(이 레포가 조석 시트에서 겪은 그것).
+ * ★사라질 때 **0 으로 되돌린다.** 안 그러면 카드가 닫혀도 밑에 있는 것이 계속 비켜 있다.
+ */
+function usePublishedBottom(name: string) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    const root = document.documentElement;
+    if (!el) { root.style.setProperty(name, '0px'); return; }
+    const publish = () => root.style.setProperty(name, `${Math.round(el.getBoundingClientRect().bottom)}px`);
+    publish();
+    const ro = new ResizeObserver(publish);
+    ro.observe(el);
+    window.addEventListener('resize', publish);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', publish);
+      root.style.setProperty(name, '0px');
+    };
+  });
+  return ref;
+}
+
 const DRAG_HOLD_MS = 600;
 /** 꾹 누르는 동안 이만큼(px) 움직이면 끌기가 아니라 지도 이동·핀치로 본다. */
 const DRAG_HOLD_SLOP = 8;
@@ -205,6 +233,8 @@ export default function App() {
   const [openPanel, setOpenPanel] = useState<null | 'info' | 'add' | 'visits'>(null);
   /** 뷰어에게 이름을 한 번 물어보는 카드. ★앱을 막지 않는다 — 지도가 먼저다. */
   const [askName, setAskName] = useState(false);
+  /** 이름 카드의 아래끝. 오른쪽 FAB 열이 이 값을 보고 비킨다(아래 주석). */
+  const askRef = usePublishedBottom('--ask-b');
   const [nameInput, setNameInput] = useState('');
   const [bannerOpen, setBannerOpen] = useState(false);
   const [infoTab, setInfoTab] = useState<'tide' | 'wind'>('tide');
@@ -1518,9 +1548,10 @@ export default function App() {
           실제로 막는 것은 파이어스토어 규칙(`isOwner()`)이고, 남이 이 화면을 열어도
           `permission-denied` 만 본다. */}
       {openPanel === 'visits' && (
-        <div className="bg-white/95 backdrop-blur rounded-2xl shadow-xl border border-gray-200 px-4 py-3">
-          <VisitsPanel onClose={() => setOpenPanel(null)} />
-        </div>
+        /* ★래퍼로 감싸지 않는다 — 표면은 시트가 직접 그린다. 감싸면 끌어서 닫을 때
+            손잡이는 안쪽에 있고 움직이는 것은 이 래퍼가 되어 카드가 제자리에 남는다.
+            (조석·바람 시트에서 같은 이유로 이미 래퍼를 걷어냈다.) */
+        <VisitsPanel onClose={() => setOpenPanel(null)} />
       )}
 
       {/* 조석·바람 상세. 칩(나침반)을 탭하거나 오른쪽 🌊 FAB 으로 연다.
@@ -1635,9 +1666,16 @@ export default function App() {
           ★조석·바람 시트도 같다(2026-09-05 실측): 시트가 커지면서 🌊 버튼이 시트 머리
           (탭 알약·「3시간 11분 남음」)를 그대로 덮었다. 겹치는 것이 늘 때마다 규칙을
           새로 만들지 말고 **이 한 줄에 조건을 더한다.** */}
-      <div className={`fixed right-3 z-50 flex flex-col gap-3 ${
-        shipCardOpen || openPanel ? 'top-24' : 'top-1/2 -translate-y-1/2'
-      }`}>
+      <div
+        style={shipCardOpen || openPanel
+          // ★`6rem`(=top-24)은 칩을 피하는 값, `--ask-b` 는 이름 카드의 실측 아래끝이다.
+          //  둘 중 **더 아래**를 고르면 규칙이 하나로 끝난다 — 카드가 없으면 변수가 0 이라
+          //  예전과 똑같이 6rem 이다. 조건을 하나 더 늘리지 않으려고 max() 를 쓴다.
+          ? { top: 'max(6rem, calc(var(--ask-b, 0px) + 0.5rem))' }
+          : undefined}
+        className={`fixed right-3 z-50 flex flex-col gap-3 ${
+          shipCardOpen || openPanel ? '' : 'top-1/2 -translate-y-1/2'
+        }`}>
         <button
           onClick={() => setOpenPanel(p => p === 'info' ? null : 'info')}
           aria-label="조석·바람"
@@ -1669,10 +1707,12 @@ export default function App() {
           팬·줌·배 선택이 전부 그대로 된다. 뷰어에게 이름부터 묻는 **전체 화면**은
           2026-08-30 에 걷어냈고, 그 결정은 그대로다.
           ★★단 **닫는 버튼은 없다**(2026-09-05 사용자 지시로 「나중에」 제거).
-           이름을 적어야 사라진다. **실측(7기종)**: 폰에서는 이 카드가 왼쪽 위 ⓘ·제목
-           줄(x12~60)을 덮는다 — 갤S20·SE·14·Max·폴드커버 전부. 아이패드미니(x180~)와
-           데스크톱(x528~)은 `max-w-sm mx-auto` 로 가운데 모여 안 덮는다.
-           즉 **폰에서는 이름을 적기 전까지 ⓘ·제목 탭에 손이 닿지 않는다.**
+           이름을 적어야 사라진다.
+          ★**`top-24` 는 칩을 피하려고 내린 것이다**(2026-09-05 사용자 지시 —
+           「이름 카드 내려서 칩 안 가리게 해」). 조석·바람 칩이 오른쪽 위에 있고
+           아래끝이 82px 라, `top-3` 에 두면 첫 방문 기기에서 **이름을 적기 전까지
+           칩에 손이 닿지 않는다.** 오른쪽 FAB 열이 패널 열릴 때 가는 자리와
+           **같은 값**을 쓴다 — 칩을 피한다는 뜻이 같으므로 숫자를 따로 두지 않는다.
           ★이름에는 **아무 권한도 붙지 않는다.** 사칭해도 얻는 것이 없다.
           ★★**「직원등록된 이름만 접속 가능합니다」는 뺐다** (2026-09-05 사용자 지시).
            그 줄은 **사실이 아니었다** — 아무 이름이나 통과하고, 카드를 무시하고 지도를
@@ -1682,7 +1722,9 @@ export default function App() {
            이 레포가 글귀를 계속 다듬어 온 이유가 그것이다(「위치 갱신」 → 「위치 확인」).
            진짜로 막게 되는 날 그때 다시 쓴다. */}
       {askName && (
-        <div className="fixed left-2 right-2 top-3 z-[60] mx-auto max-w-sm rounded-2xl bg-white/97 backdrop-blur shadow-xl border border-gray-200 px-4 py-3">
+        <div
+          ref={askRef}
+          className="fixed left-2 right-2 top-24 z-[60] mx-auto max-w-sm rounded-2xl bg-white/97 backdrop-blur shadow-xl border border-gray-200 px-4 py-3">
           <p className="text-[13px] text-gray-700 leading-relaxed">
             데이터베이스가 업데이트 되었습니다. <b>이름을 적어주세요.</b>
           </p>
