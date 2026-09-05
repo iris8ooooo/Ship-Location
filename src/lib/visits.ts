@@ -14,6 +14,9 @@
  *  **위조 가능**하다 — 즉 마음먹으면 접속 수를 부풀릴 수 있다(남의 기록을 읽거나
  *  지우지는 못한다. 그건 규칙이 막는다). 사내 도구에서 감수할 만한 위험이다.
  *
+ * ★이름은 **`adminName` 한 칸**에서 온다(`visitor-name.ts`). 관리자로 전환하며 적은 이름과
+ *  같은 값이다 — 사본을 만들었다가 이미 등록한 사람에게 또 묻는 사고를 냈다(2026-09-05).
+ *
  * ★이름은 **자기 신고**다. 서버가 진위를 확인할 방법이 없다(사내 SSO 가 없다).
  *  그래서 이름에 아무 권한도 붙이지 않는다 — 사칭해서 얻는 게 0이면 사칭할 이유도 0이다.
  *  「김은호」라고 적힌 줄을 근거로 사람을 추궁하면 안 된다.
@@ -23,15 +26,13 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { groupVisits, kstDay, type VisitRow, type VisitStats } from './visits-agg';
+import { getVisitorName, NAME_MAX } from './visitor-name';
 
 export type { DayStat, VisitStats } from './visits-agg';
+export { getVisitorName, setVisitorName, nameAsked, NAME_MAX } from './visitor-name';
 
 const DEVICE_KEY = 'visitorDevice';
-const NAME_KEY = 'visitorName';
 const LAST_DAY_KEY = 'visitDay';
-
-/** 이름 길이 상한. **규칙에도 같은 값이 박혀 있다** — 넘기면 쓰기가 거부된다. */
-export const NAME_MAX = 20;
 
 /** 이 기기의 id. 없으면 만든다. 사람이 아니라 **브라우저 하나**를 가리킨다. */
 function deviceId(): string {
@@ -46,19 +47,6 @@ function deviceId(): string {
   } catch {
     return '';   // 저장소가 막힌 브라우저 — 기록을 포기한다(앱은 그대로 돈다)
   }
-}
-
-export function getVisitorName(): string {
-  try { return localStorage.getItem(NAME_KEY) ?? ''; } catch { return ''; }
-}
-
-export function setVisitorName(name: string): void {
-  try { localStorage.setItem(NAME_KEY, name.trim().slice(0, NAME_MAX)); } catch { /* 저장 못 해도 앱은 돈다 */ }
-}
-
-/** 이름을 물어본 적이 있는가(입력했든 「나중에」를 눌렀든). */
-export function nameAsked(): boolean {
-  try { return localStorage.getItem(NAME_KEY) !== null; } catch { return true; }
 }
 
 /**
