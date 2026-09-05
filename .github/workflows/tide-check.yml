@@ -1,0 +1,135 @@
+name: Tide check
+
+# 조석 기능의 검증 묶음. 이 레포를 만지는 세션은 샌드박스라 네이티브 바이너리(esbuild·자바·크로미움)를 못 돌린다 —
+# 그래서 빌드·에뮬레이터 규칙 테스트·실제 렌더를 여기서 한다.
+#
+#  1. tsc · 파싱/물때 회귀 테스트(실제 KHOA 응답) · 프로덕션 빌드
+#  2. 에뮬레이터: 기존 규칙 테스트(ships·history 가 그대로 열려 있나) + meta/tide 규칙 테스트
+#  3. 에뮬레이터에 실제 응답을 심고 앱을 **실제로 그려** 스크린샷을 아티팩트로 남긴다
+#     (예보 있음 / 오늘치 없음 두 상태). 사용자가 디자인을 보고 확인하는 용도.
+#
+# ★공개 레포다. 스크린샷에는 KHOA 공개 예보값과 지도만 들어간다 — 사내 데이터는 없다(에뮬레이터라 배도 없다).
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'src/lib/tide.mjs'
+      - 'src/lib/tide.d.mts'
+      - 'scripts/sync-tide.mjs'
+      - 'scripts/test-tide*.mjs'
+      - 'scripts/fixtures/khoa-tide-*.json'
+      - 'firestore.rules'
+      - '.github/workflows/tide-check.yml'
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      - name: Typecheck · 파싱/물때 테스트 · 프로덕션 빌드
+        run: |
+          set -o pipefail
+          npx tsc --noEmit
+          node scripts/test-tide.mjs | tee out-test.log
+          npm run build
+          {
+            echo "## 파싱·물때 테스트 (실제 KHOA 응답)"
+            echo '```'
+            tail -n 3 out-test.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 에뮬레이터용 빌드 (VITE_FIRESTORE_EMULATOR)
+        run: VITE_FIRESTORE_EMULATOR=127.0.0.1:8080 npx vite build --outDir dist-emu
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: 에뮬레이터 — 규칙 테스트 + 실제 렌더
+        run: |
+          set -o pipefail
+          mkdir -p out/render
+          # 실제 KHOA 응답(픽스처)을 액션과 같은 코드로 문서로 만들어 에뮬레이터에 심는다.
+          cat > out/seed.mjs <<'EOF'
+          import { readFileSync } from 'node:fs';
+          import { initializeApp } from 'firebase/app';
+          import { getFirestore, connectFirestoreEmulator, doc, setDoc } from 'firebase/firestore';
+          import { parseKhoaHighLow, buildTideDoc, TIDE_DOC } from '../src/lib/tide.mjs';
+          const cfg = JSON.parse(readFileSync('firebase-applet-config.json', 'utf8'));
+          const db = getFirestore(initializeApp(cfg), cfg.firestoreDatabaseId);
+          connectFirestoreEmulator(db, '127.0.0.1', 8080);
+          const dates = ['2026-09-05', '2026-09-06', '2026-09-07', '2026-09-08'];
+          const days = dates.map(d => parseKhoaHighLow(JSON.parse(readFileSync(`scripts/fixtures/khoa-tide-DT_0007-${d.replace(/-/g, '')}.json`, 'utf8')), d));
+          const at = Date.UTC(2026, 8, 4, 19, 3);   // 2026-09-05 04:03 KST — 크론 시각
+          await setDoc(doc(db, TIDE_DOC.collection, TIDE_DOC.id), buildTideDoc(days, at));
+          console.log(`seeded ${dates.length} days`);
+          process.exit(0);
+          EOF
+          cat > out/render.mjs <<'EOF'
+          import { chromium } from 'playwright';
+          const b = await chromium.launch();
+          const shots = [
+            // [이름, 브라우저 시계(KST), 기대 문구]
+            ['tide-ok',      '2026-09-05T10:00:00+09:00', '음력 24일 무시'],
+            ['tide-evening', '2026-09-05T21:30:00+09:00', '썰물 진행중'],
+            ['tide-missing', '2026-09-20T10:00:00+09:00', '조석예보 없음'],
+          ];
+          const out = [];
+          for (const [name, at, expect] of shots) {
+            const ctx = await b.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, locale: 'ko-KR', timezoneId: 'Asia/Seoul' });
+            const page = await ctx.newPage();
+            await page.clock.setFixedTime(new Date(at));
+            await page.goto('http://127.0.0.1:4173/', { waitUntil: 'domcontentloaded' });
+            await page.getByLabel('조석·바람').click({ timeout: 30000 });
+            await page.waitForTimeout(4000);
+            const panel = page.getByText('🌊 조석표').locator('xpath=ancestor::div[contains(@class,"rounded-2xl")][1]');
+            await panel.screenshot({ path: `out/render/${name}-panel.png` });
+            await page.screenshot({ path: `out/render/${name}-full.png` });
+            const txt = (await panel.innerText()).replace(/\n/g, ' | ');
+            out.push(`${name}: ${txt.includes(expect) ? '✓' : '✗ (기대 「' + expect + '」)'}  ${txt}`);
+            await ctx.close();
+          }
+          await b.close();
+          console.log(out.join('\n'));
+          if (out.some(l => l.includes('✗'))) process.exit(1);
+          EOF
+          cat > out/run.sh <<'EOF'
+          set -eo pipefail
+          node scripts/test-visits-rules.mjs | tee out/rules-visits.log
+          node scripts/test-tide-rules.mjs  | tee out/rules-tide.log
+          FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 node out/seed.mjs
+          npx vite preview --outDir dist-emu --port 4173 --strictPort > out/preview.log 2>&1 &
+          PV=$!
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:4173/ >/dev/null && break; sleep 1; done
+          node out/render.mjs | tee out/render.log
+          kill $PV || true
+          EOF
+          npx firebase-tools@13 emulators:exec --only firestore --project ship-location-rules-test "bash out/run.sh"
+          {
+            echo "## 규칙 테스트"
+            echo '```'
+            tail -n 2 out/rules-visits.log
+            tail -n 2 out/rules-tide.log
+            echo '```'
+            echo "## 실제 렌더 (아이폰14 크기, 에뮬레이터 데이터)"
+            echo '```'
+            cat out/render.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tide-render-${{ github.run_number }}
+          path: out/render/
+          retention-days: 7
+          if-no-files-found: ignore
