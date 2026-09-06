@@ -71,10 +71,16 @@ const SCHED = {
   ],
 };
 
+// ★`work_tasks` 가 요청되면 **새어 나갈 값을 실제로 돌려준다.** 빈 배열을 돌려주면
+//  옛 코드도 조용히 통과해 이 테스트가 아무 뜻이 없어진다 — 유출 테스트는 유출될
+//  데이터를 줘야 유출을 잡는다. 제목은 한눈에 알아볼 표식으로 둔다.
+const LEAK = '사내업무메모_새면안됨';
 let usedTable = null;
+const requested = new Set();
 globalThis.fetch = async (url) => {
   const u = new URL(url);
   const table = u.pathname.split('/').pop();
+  requested.add(table);
   const hull = (u.searchParams.get('vessel_no') ?? '').replace('eq.', '');
   const json = body => ({ ok: true, json: async () => body });
   if (table === 'vessel_schedule_rows' || table === 'vessel_schedules') {
@@ -83,7 +89,9 @@ globalThis.fetch = async (url) => {
   }
   if (table === 'prep_rules') return json([RULE]);
   if (table === 'prep_checks') return json([]);
-  if (table === 'work_tasks') return json([]);
+  if (table === 'work_tasks') {
+    return json([{ title: LEAK, category: '분류', due_date: day(1), status: 'todo', vessel_no: hull || 'A' }]);
+  }
   throw new Error(`예상 못 한 테이블: ${table}`);
 };
 
@@ -142,6 +150,23 @@ const e = prep(E)[0];
 ok(prep(E).length === 1, `준비 1건 (실제 ${prep(E).length}건)`);
 ok(e?.date === day(5),
   `마감일은 부모(D+12)−7 = D+5 여야 한다. 세부(D+8)에 끌려가면 안 된다 (실제 ${e?.date} / 기대 ${day(5)})`);
+
+console.log('\n[5] ★사내 업무(work_tasks)가 호선 카드로 새지 않는가 (2026-09-06 사용자 지시)');
+{
+  // 이 카드는 **뷰어 누구나** 본다. 사내 업무 메모가 실리면 안 된다.
+  // ★막는 방식이 「걸러서 감추기」가 아니라 **「아예 요청하지 않기」**인지를 잰다 —
+  //  거르는 방식은 조건이 하나 어긋나는 순간 그대로 새고, 실제로 그렇게 샜다
+  //  (실측 2026-09-06: 마감일 있는 미완료 업무 11건·5호선 중 8건이 화면에 떠 있었다).
+  ok(!requested.has('work_tasks'),
+    `work_tasks 를 한 번도 요청하지 않는다 (요청한 테이블: ${[...requested].join(', ')})`);
+  const all = [A, B, C, D, E, await fetchVesselPlan('F')];
+  ok(all.every(p => p.tasks.every(t => t.kind === '준비')),
+    '카드에 오르는 할일은 준비뿐이다 (업무 종류가 없다)');
+  const 새어나온줄 = all.flatMap(p => [...p.tasks, ...p.today, ...p.upcoming])
+    .filter(i => i.label.includes(LEAK));
+  ok(새어나온줄.length === 0,
+    `업무 제목이 카드 어디에도 안 나온다 (실제 ${새어나온줄.length}줄)`);
+}
 
 console.log(fail === 0 ? '\n전부 통과' : `\n${fail}건 실패`);
 process.exit(fail === 0 ? 0 : 1);

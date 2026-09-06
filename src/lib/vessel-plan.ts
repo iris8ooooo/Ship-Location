@@ -3,28 +3,34 @@
  *
  * 공정관리 앱으로 진입하는 대신 카드 안에서 바로 보여준다(2026-08-29 사용자 지시).
  *   - 공정(vessel_schedule_rows): 오늘 걸쳐 있는 것 + 시작이 다가온 것
- *   - 할일: 공정관리비서 **사이드바 `할일` 탭**의 `업무`·`준비` 두 종류 (2026-08-30 사용자 지시)
+ *   - 준비(prep_rules × 공정): 공정관리비서 **사이드바 `할일` 탭**의 준비 항목
  *   둘 다 **오늘부터 5일**까지만 본다("공정기준 -5일" — 2026-08-29·08-30 사용자 지시).
  *   ★할일탭 원본은 +14일을 보지만 여기서는 5일로 좁혔다 — 14일이면 준비만으로 카드가
  *    꽉 찬다(실측 8206: 묶고 나서도 14일 11줄 → 5일 5줄).
  *
- * ★혼동 주의 — 공정관리비서에는 이름이 비슷한 두 곳이 있다. 2026-08-30 에 헷갈려
- *   한 번 잘못 붙였다가 통째로 되돌렸다(#72 → #73):
- *     · **업무 탭**의 `할일 / 진행 / 완료` 칸 = work_tasks 원본. **이건 올리지 않는다.**
- *     · **할일 탭**(대시보드 바로 아래) = 날짜 있는 것만 모은 집계 피드.
- *       원본은 LNG 앱 `src/lib/todo-feed.ts` 의 `buildTodoFeed` — 아래 로직은 그걸 옮긴 것이다.
+ * ★★★**`work_tasks` 는 아예 읽지 않는다** (2026-09-06 사용자 지시:
+ *   「업무 > 할일에 있는게 보인단말이야. 다른직원들이 보면 안되는건데 …
+ *    그쪽은 아예 들여다 보지도 않게 해야해」).
+ *   이 앱의 호선 카드는 **뷰어 누구나** 본다. `work_tasks` 는 사내 업무 메모라
+ *   거기 실리면 안 되는 내용이다. **읽지 않는 것이 유일하게 확실한 차단**이다 —
+ *   조건으로 거르는 방식은 조건이 하나 어긋나는 순간 그대로 새고, 실제로 그렇게 샜다.
+ *   ★실측(2026-09-06): 마감일 있는 미완료 업무 **11건 · 5호선**, 그중 **8건이 5일 창
+ *    안에 들어와 화면에 떠 있었다.** 2026-08-30 에는 그런 행이 DB 에 1건뿐이고 호선도
+ *    없어서 "넣어도 안 뜬다" 로 판단했는데, **데이터가 늘자 그 판단이 그대로 유출이 됐다.**
+ *   ★교훈: **「지금 데이터로는 안 보인다」는 안전장치가 아니다.** 보이면 안 되는 것은
+ *    데이터 양과 무관하게 **경로 자체를 끊는다.** 회귀 테스트가 이 요청을 붙잡고 있다
+ *    (`test-vessel-plan.mjs` — work_tasks 를 한 번이라도 요청하면 빨간불).
  *
- * 할일탭이 모으는 다섯 종류 중 여기 옮긴 것은 **업무·준비 둘**이다.
- *   · 업무: work_tasks 중 `status ≠ done` **이면서 마감일이 있는 것**. `진행`도 포함하고,
- *     마감일이 없으면 아예 안 올라간다. (`status=todo` 로 거르면 그게 업무탭 칸이다.)
+ * 할일탭이 모으는 다섯 종류 중 여기 옮긴 것은 **준비 하나**다.
  *   · 준비: prep_rules 의 트리거일 = 공정 계획일 − lead_days. prep_checks 완료분 제외.
+ *   · 업무(work_tasks)는 위 이유로 **뺐다. 다시 넣지 말 것.**
  *   · 자재통보·자재지연은 **옮기지 않았다** — 파생 로직이 LNG 앱 materials.ts 843줄이라
  *     복사하면 두 앱이 조용히 갈라진다. 하려면 DB 에 공용 뷰를 만들어 둘이 같이 쓴다.
  *
  * ★PostgREST 필터는 `eq.` 만 쓴다. 이 개발 환경은 프록시가 supabase.co 를 막아 REST 문법을
  *   실서버로 확인할 방법이 없고, 문법이 틀리면 에러가 아니라 **빈 목록**으로 조용히 돌아온다.
  *   그래서 `neq.`·`not.is.null`·`in.(...)` 을 쓰지 않고 넉넉히 받아 코드에서 거른다
- *   (한 호선당 공정 144행·업무 14행 이하라 부담이 없다).
+ *   (한 호선당 공정 144행 이하라 부담이 없다).
  *
  * ★공정은 테이블이 아니라 **뷰 `vessel_schedule_rows`** 를 읽는다 (2026-09-02).
  *   한 공정에 묶여 있던 검사가 다른 날 따로 잡히는 경우가 생겼고(부모 행의 `sub_items` jsonb),
@@ -60,8 +66,6 @@ const SUPA_URL = 'https://ltjdaviuglvswkgxmkvl.supabase.co/rest/v1';
 const SUPA_KEY = 'sb_publishable_d471VDiUvHlMVgvt1bQF6A_rx3lTLKW';
 const HEADERS = { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` };
 
-/** `vessel_no` 가 이 값이면 특정 호선이 아니라 전 호선 공통 할일이다(자유 텍스트 컬럼). */
-const ALL_SHIPS = '모든호선';
 
 /** 앞으로 며칠까지 볼 것인가. **공정과 할일이 같은 값을 쓴다** — 임계값을 두 군데 두면
  *  한쪽만 고치게 된다. 지난 것(지연)은 이 값과 무관하게 항상 올라온다.
@@ -89,9 +93,9 @@ export interface PlanItem {
 }
 
 export interface TaskItem extends PlanItem {
-  /** 할일탭의 종류 라벨. */
-  kind: '준비' | '업무';
-  /** 부가 설명 — 준비는 겨냥하는 공정 계획일, 업무는 분류. */
+  /** 할일탭의 종류 라벨. ★`'업무'` 는 없앴다 — 위 머리 주석 참고(사내 업무 메모 유출). */
+  kind: '준비';
+  /** 부가 설명 — 겨냥하는 공정 계획일. */
   sub: string;
 }
 
@@ -100,7 +104,7 @@ export interface VesselPlan {
   today: PlanItem[];
   /** 시작이 D-5 이내로 다가온 공정 */
   upcoming: PlanItem[];
-  /** 할일탭의 업무·준비. D-day 순 — 지난 것이 먼저. */
+  /** 할일탭의 준비. D-day 순 — 지난 것이 먼저. */
   tasks: TaskItem[];
   /** 할일만 못 읽었을 때. 공정은 살아 있으므로 카드를 통째로 죽이지 않는다. */
   tasksFailed: boolean;
@@ -161,12 +165,12 @@ export async function fetchVesselPlan(hull: string): Promise<VesselPlan | null> 
 
   try {
     const soft = (url: string) => fetch(url, { headers: HEADERS }).catch(() => null);
-    const [rSched, rTaskHull, rTaskAll, rRules, rChecks] = await Promise.all([
+    // ★`work_tasks` 요청은 **여기 없다.** 걸러서 감추는 것이 아니라 아예 안 가져온다 —
+    //  조건으로 막는 방식은 조건이 하나 어긋나면 그대로 새고, 실제로 그렇게 샜다(머리 주석).
+    const [rSched, rRules, rChecks] = await Promise.all([
       fetch(byVessel('vessel_schedule_rows', hull,
         'tank_no,activity_order,activity_name,planned_start_date,duration_days,applicable,actual_start_date,status,sub_key'),
         { headers: HEADERS }),
-      soft(byVessel('work_tasks', hull, 'title,category,due_date,status,vessel_no')),
-      soft(byVessel('work_tasks', ALL_SHIPS, 'title,category,due_date,status,vessel_no')),
       soft(`${SUPA_URL}/prep_rules?` + new URLSearchParams({ select: 'id,activity_order,title,lead_days,active,per_tank,tanks' })),
       soft(byVessel('prep_checks', hull, 'rule_id,tank_no')),
     ]);
@@ -205,22 +209,13 @@ export async function fetchVesselPlan(hull: string): Promise<VesselPlan | null> 
     }
     upcoming.sort((a, b) => (a.date! < b.date! ? -1 : 1));
 
-    // ── 할일탭: 업무 + 준비 ────────────────────────────────────────
+    // ── 할일탭: 준비 ───────────────────────────────────────────────
     // 하나라도 못 읽으면 "할일 불러오기 실패" 를 적는다. 조용히 비워 두면 "할일이 없는 것" 과
     // "못 읽은 것" 을 구분할 수 없다 — 이 프로젝트가 반복해서 당한 조용한 오답이다.
     const tasks: TaskItem[] = [];
-    let tasksFailed = !(rTaskHull?.ok && rTaskAll?.ok && rRules?.ok && rChecks?.ok);
+    let tasksFailed = !(rRules?.ok && rChecks?.ok);
 
     if (!tasksFailed) {
-      // 업무 — status ≠ done 그리고 **마감일이 있는 것**만. 진행중도 올라간다.
-      for (const r of [...await rTaskHull!.json(), ...await rTaskAll!.json()] as any[]) {
-        if (r.status === 'done' || !r.due_date || r.due_date > horizon) continue;
-        tasks.push({
-          kind: '업무', label: r.title, date: r.due_date, dday: diffDays(today, r.due_date),
-          sub: `${r.category ?? ''}${r.vessel_no === ALL_SHIPS ? ' · 모든호선' : ''}`.trim(),
-        });
-      }
-
       // 준비 — 공정 계획일에서 lead_days 를 뺀 날이 트리거다.
       // 룰은 표준 룰북 기준이라 DF형 호선(activity_order > RULEBOOK_LEN)은 통째로 제외한다.
       // ★부모 행만 본다. 세부 행(부모+0.5)을 섞으면 36번 공정에 세부가 붙는 순간
