@@ -241,6 +241,28 @@ jobs:
           //  ★로컬에서는 못 잰다: 파이어스토어가 개발 세션에서 막혀 배가 한 척도 없고,
           //   DOM 에 마커를 심어 봐야 React 핸들러가 안 붙어 카드가 안 뜬다.
           //   진짜 배가 있는 곳은 프로덕션뿐이다.
+          // ── ★사내 업무(work_tasks)가 카드로 새지 않는가 — **프로덕션 실제 번들에서** 잰다.
+          //  로컬 목 테스트(test-vessel-plan [5])는 "우리 코드가 요청하지 않는다" 를 잰다.
+          //  여기서 재는 것은 "배포된 것이 실제로 요청하지 않는다" 다 — 둘은 다른 질문이다.
+          //  실측 2026-09-06: 8206·8263·8300 에 업무가 떠 있었다. 그중 8206 을 열어 본다.
+          {
+            const hit = [];
+            const spy = r => { if (/work_tasks/.test(r.url())) hit.push(r.url().split('?')[0]); };
+            page.on('request', spy);
+            await page.goto(`${URL}?hull=8206`, { waitUntil: 'domcontentloaded' });
+            await page.waitForTimeout(6000);
+            await page.locator('#ship-8206').click({ timeout: 8000 }).catch(() => {});
+            await page.waitForTimeout(3000);
+            const txt = await page.locator('div.fixed').filter({ has: page.getByLabel('닫기') })
+              .first().innerText().catch(() => '(카드를 못 읽음)');
+            page.off('request', spy);
+            console.log(`work_tasks 요청 ${hit.length}건 ${hit.length ? '✗ 샌다' : '✓ 안 나간다'}`);
+            console.log(`8206 카드에 「업무」 글자 ${txt.includes('업무') ? '✗ 있다' : '✓ 없다'}`);
+            await shot('05-hull8206');
+          }
+          await page.goto(URL, { waitUntil: 'domcontentloaded' });   // 나머지 검사를 위해 되돌린다
+          await page.waitForTimeout(5000);
+
           const card = page.locator('div.fixed').filter({ has: page.getByLabel('닫기') }).first();
           const marker = page.locator('[id^="ship-"]').first();
           if (await marker.count()) {
