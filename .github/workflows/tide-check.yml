@@ -23,13 +23,13 @@ on:
         default: false
   pull_request:
     paths:
-      - 'src/lib/tide.mjs'
-      - 'src/lib/tide.d.mts'
+      # ★`src/**` 를 통째로 본다. 예전에는 `tide.mjs`·`App.tsx` 등 몇 개만 적어 뒀는데,
+      #  `vessel-plan.ts` 만 고치면 이 검사가 **아예 안 돌았다** — 그 파일이 사내 업무가
+      #  공개 카드로 새는 것을 막는 가드를 갖고 있다(2026-09-06). 목록으로 관리하면 빠뜨린다.
+      - 'src/**'
+      - 'scripts/test-*.mjs'
       - 'scripts/sync-tide.mjs'
-      - 'scripts/test-tide*.mjs'
       - 'scripts/fixtures/khoa-tide-*.json'
-      - 'src/App.tsx'
-      - 'src/firebase.ts'
       - 'firestore.rules'
       - '.github/workflows/tide-check.yml'
 
@@ -50,6 +50,15 @@ jobs:
           set -o pipefail
           npx tsc --noEmit
           node scripts/test-tide.mjs | tee out-test.log
+          # ★파이어스토어·브라우저 없이 도는 검증을 **전부** 돌린다. 예전에는 test-tide 하나만
+          #  돌아서 나머지는 사람이 기억할 때만 돌았다 — **안 도는 가드는 가드가 아니다.**
+          #  특히 `test-vessel-plan` [5] 는 사내 업무(work_tasks)가 공개 카드로 새는 것을
+          #  막는 검사다(2026-09-06 유출 건). 하나라도 빨간불이면 set -e 로 여기서 멈춘다.
+          for t in test-vessel-plan test-sea test-visits-agg test-visitor-name \
+                   test-berth-label test-bow-detect test-bow-plan test-bow-safety; do
+            echo "── $t"
+            node "scripts/$t.mjs" | tail -n 2
+          done
           npm run build
           {
             echo "## 파싱·물때 테스트 (실제 KHOA 응답)"
