@@ -66,6 +66,9 @@ import { RotateCcw, RotateCw, X, MessageSquare, Plus, Waves, Info, ChevronUp, Ch
 import VisitsPanel from './components/VisitsPanel';
 import { recordVisit, recordVisitWithName, setVisitorName, nameAsked, NAME_MAX } from './lib/visits';
 import SeaChip from './components/SeaChip';
+import WeatherFx from './components/WeatherFx';
+import { wmoToWx, windPushX, FX_START_DELAY_MS, type Wx } from './lib/weather';
+import { windTravelScreenDeg } from './lib/sea';
 import SeaSheet from './components/SeaSheet';
 import { useDragToClose } from './components/useDragToClose';
 
@@ -240,6 +243,10 @@ export default function App() {
   const [infoTab, setInfoTab] = useState<'tide' | 'wind'>('tide');
   /** 지금 시각(분). 칩의 「남은 시간」이 이걸 본다 — 조석과 같은 1분 타이머로 돈다. */
   const [windFailed, setWindFailed] = useState(false);
+  /** 지금 날씨(비·눈·뇌우). 맑음·구름·안개면 null 이고 아무것도 안 그린다. */
+  const [wx, setWx] = useState<Wx | null>(null);
+  /** ★효과는 앱이 뜨고 4초 뒤에 붙는다 — 첫 화면을 느리게 하지 않기 위한 것(사용자 지시). */
+  const [fxReady, setFxReady] = useState(false);
   const [windData, setWindData] = useState<{speed: number, direction: string, degrees: number, time: string, hourly: { speeds: number[] }} | null>(null);
   /** meta/tide 문서. undefined = 아직 안 왕다 · null = 문서가 없다(한 번도 수신 안 됨). */
   const [tideDoc, setTideDoc] = useState<TideDoc | null | undefined>(undefined);
@@ -254,6 +261,7 @@ export default function App() {
   
   const containerRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
+  const [viewportEl, setViewportEl] = useState<HTMLDivElement | null>(null);
   /** 아래에 쌓이는 것들의 실측 높이. 서로를 밀어 올리는 기준이 된다. */
   const dockRef = usePublishedHeight('--dock-h');
   const sheetRef = usePublishedHeight('--sheet-h');
@@ -297,6 +305,9 @@ export default function App() {
     nativeCleanup.current?.();
     nativeCleanup.current = null;
     viewportRef.current = node;
+    // ★ref 만으로는 날씨 효과가 뷰포트를 못 받는다 — ref 가 채워져도 리렌더가 안 나기 때문이다.
+    //  같은 노드를 상태로도 들고 있어야 효과 캔버스가 「어디를 덮을지」를 알 수 있다.
+    setViewportEl(node);
 
     if (node) {
       const onWheel = (e: WheelEvent) => {
@@ -610,6 +621,12 @@ export default function App() {
     }
   }, []);
 
+  // 효과를 붙이기 전에 첫 화면이 자리를 잡을 시간을 준다.
+  useEffect(() => {
+    const t = setTimeout(() => setFxReady(true), FX_START_DELAY_MS);
+    return () => clearTimeout(t);
+  }, []);
+
   useEffect(() => {
     const fetchWindData = async () => {
       try {
@@ -618,7 +635,10 @@ export default function App() {
         const data = await res.json();
         if (data.current_weather && data.hourly) {
           setWindFailed(false);
-          const { windspeed, winddirection, time } = data.current_weather;
+          // ★`weathercode` 는 **이미 이 응답 안에 있었다** — 지금까지 꺼내지 않고 버렸을 뿐이다.
+          //  지도 위 날씨 효과 때문에 요청이 한 건도 늘지 않는 이유가 이것이다.
+          const { windspeed, winddirection, time, weathercode } = data.current_weather;
+          setWx(wmoToWx(weathercode));
           const dirs = ['북', '북북동', '북동', '동북동', '동', '동남동', '남동', '남남동', '남', '남남서', '남서', '서남서', '서', '서북서', '북서', '북북서'];
           const dirStr = dirs[Math.round(winddirection / 22.5) % 16];
           
@@ -640,6 +660,8 @@ export default function App() {
         //  그건 그냥 틀린 방향을 자신 있게 가리키는 것이 된다. 못 받았으면 못 받았다고 한다.
         setWindData(null);
         setWindFailed(true);
+        setWx(null);           // 못 받았으면 안 그린다. 지어낸 날씨는 지어낸 조석과 같다.
+
       }
     };
 
@@ -1754,6 +1776,9 @@ export default function App() {
       <div
         ref={dockRef}
         style={{ bottom: 'calc(3rem + env(safe-area-inset-bottom))' }}
+        /* ★날씨 효과의 「창틀」 — 눈이 여기 윗변에 쌓인다. 높이를 WeatherFx 에 또 적지 않고
+           이 표시를 재게 한다(아래에 쌓이는 것들에 쓰던 `--dock-h` 규칙과 같은 뜻). */
+        data-map-sill
         className="fixed left-0 right-0 z-40 px-2 overflow-x-auto"
       >
         <div className="grid grid-rows-2 grid-flow-col gap-1 w-max mx-auto pb-0.5">
@@ -1887,6 +1912,19 @@ export default function App() {
       )}
 
 
+
+      {/* 지도 위 날씨 — **B 창에 맺힌 날씨**(2026-09-06 사용자가 고른 방향).
+          `position: fixed` 라 지도가 스크롤·회전해도 유리는 화면에 그대로 붙어 있다.
+          날씨가 비·눈·뇌우 가 아니거나 4초가 아직 안 지났으면 아무것도 안 그린다. */}
+      {fxReady && (
+        <WeatherFx
+          wx={wx}
+          viewport={viewportEl}
+          /* 바람이 **가는 쪽**의 가로 성분. 각도 규약은 `sea.ts` 한 곳에서 내려온다 —
+             칩의 나침반과 비가 서로 다른 쪽을 가리키면 그 순간 둘 다 못 믿게 된다. */
+          pushX={windData ? windPushX(windData.speed, windTravelScreenDeg(windData.degrees, rot)) : 0}
+        />
+      )}
 
       {/* Viewport */}
       <div 

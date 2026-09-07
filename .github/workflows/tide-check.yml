@@ -54,7 +54,7 @@ jobs:
           #  돌아서 나머지는 사람이 기억할 때만 돌았다 — **안 도는 가드는 가드가 아니다.**
           #  특히 `test-vessel-plan` [5] 는 사내 업무(work_tasks)가 공개 카드로 새는 것을
           #  막는 검사다(2026-09-06 유출 건). 하나라도 빨간불이면 set -e 로 여기서 멈춘다.
-          for t in test-vessel-plan test-sea test-visits-agg test-visitor-name \
+          for t in test-vessel-plan test-sea test-weather test-visits-agg test-visitor-name \
                    test-berth-label test-bow-detect test-bow-plan test-bow-safety; do
             echo "── $t"
             node "scripts/$t.mjs" | tail -n 2
