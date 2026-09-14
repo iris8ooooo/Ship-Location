@@ -1,0 +1,52 @@
+/**
+ * 배 위치 수집 일정과 「수집이 죽었나」 판정. **파이어스토어도 브라우저도 모른다** —
+ * 그래야 `node scripts/test-sync-schedule.mjs` 로 실제 코드를 그대로 돌려 검증할 수 있다
+ * (`sea.ts`·`weather.ts`·`yard-transform.mjs` 와 같은 이유).
+ *
+ * ★★**균등 주기가 아니면 「주기 x 1.5」 로는 판정할 수 없다** (2026-09-14).
+ *  예전에는 6시간 균등(KST 06/12/18/00)이라 `SYNC_PERIOD_H * 90` 한 줄이면 됐다.
+ *  업무시간에만 돌게 바꾸면서 **밤 사이 간격이 15시간**이 됐다(17시 → 다음날 8시).
+ *  그 규칙을 그대로 두면 **매일 밤 21시 반에 멀쩡한 수집이 빨갛게** 뜬다 — 칩이
+ *  지켜야 하는 건 「몇 시간째 그대로」와 「수집이 죽음」을 가르는 것인데, 매일 밤
+ *  거짓 빨간불이 뜨면 그 구분이 통째로 무의미해진다.
+ *
+ *  그래서 「얼마나 오래됐나」가 아니라 **「돌았어야 할 것을 걸렀나」**로 판정한다.
+ *  밤에는 다음 예정이 아침 8시이므로 17시 값이 6시간 묵어도 정상이고,
+ *  아침 9시 반에 8시 것이 안 들어왔으면 그때는 빨갛다.
+ */
+
+/**
+ * 수집이 도는 시각(KST, 정시). `.github/workflows/sync-safetyone.yml` 의 크론과
+ * **같은 값이어야 한다.** 크론을 바꾸면 여기도 같이 바꾼다 — 이 파일이 그 유일한 짝이다.
+ * (2026-09-14 사용자 지시: 「오전 8시부터 3시간 단위로 하고 오후 6시에 정지」)
+ */
+export const SYNC_HOURS_KST = [8, 11, 14, 17];
+
+/**
+ * 크론이 밀리는 것을 감안한 여유(분).
+ * 깃허브 **스케줄 워크플로는 부하 때 지연·유실된다** — 정시에 딱 맞춰 판정하면
+ * 몇 분 밀릴 때마다 빨개진다. 여기에 스크레이프·쓰기 시간까지 얹어 90분을 준다.
+ */
+export const SYNC_SLACK_MIN = 90;
+
+const KST_OFFSET_MIN = 9 * 60;
+const DAY_MIN = 24 * 60;
+
+/**
+ * 지금 시각 기준으로 **이미 들어왔어야 하는** 가장 최근 수집 시각(ms).
+ * 여유(`SYNC_SLACK_MIN`)를 빼고 나서 찾으므로, 방금 시작한 회차는 아직 안 센다.
+ */
+export function lastDueAt(nowMs: number): number {
+  const t = Math.floor(nowMs / 60000) + KST_OFFSET_MIN - SYNC_SLACK_MIN;   // KST 분
+  const minOfDay = ((t % DAY_MIN) + DAY_MIN) % DAY_MIN;
+  const dayStart = t - minOfDay;
+  const hours = [...SYNC_HOURS_KST].sort((a, b) => b - a);                  // 늦은 것부터
+  for (const h of hours) if (h * 60 <= minOfDay) return (dayStart + h * 60 - KST_OFFSET_MIN) * 60000;
+  // 오늘 것이 아직 하나도 안 왔으면 **어제 마지막 회차**가 기준이다.
+  return (dayStart - DAY_MIN + hours[0] * 60 - KST_OFFSET_MIN) * 60000;
+}
+
+/** 마지막 확인이 「돌았어야 할 시각」보다 이전이면 한 번은 확실히 거른 것이다 → 빨갛다. */
+export function syncIsStale(lastSyncMs: number, nowMs: number): boolean {
+  return lastSyncMs < lastDueAt(nowMs);
+}

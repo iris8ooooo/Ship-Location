@@ -28,6 +28,9 @@ on:
       #  공개 카드로 새는 것을 막는 가드를 갖고 있다(2026-09-06). 목록으로 관리하면 빠뜨린다.
       - 'src/**'
       - 'scripts/test-*.mjs'
+      # ★수집 크론만 고쳐도 `test-sync-schedule` [4] 가 돌아야 한다. 그 검사가 이 파일을
+      #  직접 읽어 앱 상수(`SYNC_HOURS_KST`)와 대조한다 — 안 도는 가드는 가드가 아니다.
+      - '.github/workflows/sync-safetyone.yml'
       - 'scripts/sync-tide.mjs'
       - 'scripts/fixtures/khoa-tide-*.json'
       - 'firestore.rules'
@@ -54,7 +57,8 @@ jobs:
           #  돌아서 나머지는 사람이 기억할 때만 돌았다 — **안 도는 가드는 가드가 아니다.**
           #  특히 `test-vessel-plan` [5] 는 사내 업무(work_tasks)가 공개 카드로 새는 것을
           #  막는 검사다(2026-09-06 유출 건). 하나라도 빨간불이면 set -e 로 여기서 멈춘다.
-          for t in test-vessel-plan test-sea test-weather test-visits-agg test-visitor-name \
+          for t in test-vessel-plan test-sea test-weather test-sync-schedule \
+                   test-visits-agg test-visitor-name \
                    test-berth-label test-bow-detect test-bow-plan test-bow-safety; do
             echo "── $t"
             node "scripts/$t.mjs" | tail -n 2

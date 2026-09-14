@@ -69,6 +69,7 @@ import SeaChip from './components/SeaChip';
 import WeatherFx from './components/WeatherFx';
 import { wmoToWx, windPushX, FX_START_DELAY_MS, type Wx } from './lib/weather';
 import { windTravelScreenDeg } from './lib/sea';
+import { syncIsStale } from './lib/sync-schedule';
 import SeaSheet from './components/SeaSheet';
 import { useDragToClose } from './components/useDragToClose';
 
@@ -187,17 +188,11 @@ const DRAG_HOLD_MS = 600;
 /** 꾹 누르는 동안 이만큼(px) 움직이면 끌기가 아니라 지도 이동·핀치로 본다. */
 const DRAG_HOLD_SLOP = 8;
 
-/**
- * 수집 주기(시간). `.github/workflows/sync-safetyone.yml` 의 크론과 같은 값이어야 한다.
- * 여기를 고치면 아래 STALE 도 같이 따라간다 — 임계값을 두 군데 적지 않는다.
- */
-const SYNC_PERIOD_H = 6;
-/**
- * 심장박동이 이만큼(분) 없으면 빨갛게. 지켜야 하는 건 "몇 시간째 그대로" 와
- * "수집이 죽음" 을 가르는 것이므로, 주기의 1.5배 = 한 번은 확실히 걸렀을 때만 빨갛다.
- * 주기와 똑같이 잡으면 깃허브 크론이 몇 분만 밀려도 멀쩡한 수집이 빨갛게 뜬다.
- */
-const SYNC_STALE_MIN = SYNC_PERIOD_H * 90;
+/* 수집 일정과 「죽었나」 판정은 `src/lib/sync-schedule.ts` 한 곳에 있다.
+   ★예전에는 여기 `SYNC_PERIOD_H = 6` 한 줄이었다. 수집이 **업무시간에만** 돌게 바뀌면서
+    (KST 08/11/14/17) 밤 사이 간격이 15시간이 되어, 「주기 x 1.5」로는 **매일 밤 멀쩡한
+    수집이 빨갛게** 뜬다. 그래서 「얼마나 오래됐나」가 아니라 「돌았어야 할 것을 걸렀나」로
+    판정한다. 파이어스토어를 모르는 파일이라 브라우저 없이 그대로 돌려 검증한다. */
 
 export default function App() {
   const [ships, setShips] = useState<Record<string, ShipData>>({});
@@ -1510,14 +1505,15 @@ export default function App() {
             <h4 className="shrink-0 font-bold text-sm text-gray-800">최근 업데이트</h4>
             {lastSync !== null && (() => {
               // "몇 시간째 그대로" 와 "수집이 죽음" 이 구분돼야 한다.
-              // 기준은 SYNC_STALE_MIN 한 곳에서만 정한다.
+              // 기준은 `sync-schedule.ts` 한 곳에서만 정한다 — 밤에는 다음 예정이
+              // 아침 8시라 17시 값이 묵어도 정상이고, 아침 것을 거르면 그때 빨갛다.
               // ★글귀는 `위치 확인` 이다 (2026-08-30 사용자 지시). `3중점검` 은 세이프티원의
               //  화면 이름이지 이 칩이 말하는 것이 아니다. `위치 갱신` 도 아니다 — 배가
               //  안 움직여도 이 시각은 찍히므로 "갱신됐다" 는 사실이 아니다. 확인한 것이다.
               const mins = Math.floor((Date.now() - lastSync) / 60000);
               const label = mins < 60 ? `${mins}분 전` : `${Math.floor(mins / 60)}시간 전`;
               return (
-                <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full whitespace-nowrap ${mins > SYNC_STALE_MIN ? 'bg-red-100 text-red-700' : 'bg-teal-50 text-teal-700'}`}>
+                <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full whitespace-nowrap ${syncIsStale(lastSync, Date.now()) ? 'bg-red-100 text-red-700' : 'bg-teal-50 text-teal-700'}`}>
                   위치 확인 {label}
                 </span>
               );
