@@ -232,6 +232,22 @@ jobs:
               await shot('01b-namecard');
             }
           }
+          // ── ★이름 카드를 치운다. 안 치우면 아래 호선 카드 검사가 **조용히 안 돈다.**
+          //  이 잡은 빈 프로필이라 카드가 늘 떠 있고, 카드는 y96~194 에 화면 폭을 거의 다
+          //  써서 지도 위쪽 마커를 덮는다. 그 위를 누르면 Playwright 가 10초를 꽉 채우고
+          //  타임아웃하는데 `.catch()` 가 삼켜서 「카드가 안 떴다」 한 줄만 남았다
+          //  (run 31 에서 실제로 그랬다 — 검사 넷이 빠진 채 초록불이었다).
+          //  ★프로덕션에 가짜 접속 기록이 남지 않는다: `recordVisit` 첫 줄의
+          //   `navigator.webdriver` 가드를 이 경로(`recordVisitWithName`)도 그대로 탄다.
+          {
+            const input = page.locator('input[placeholder="예: 홍길동"]');
+            if (await input.count()) {
+              await input.fill('자동점검');
+              await page.getByRole('button', { name: '저장' }).click({ timeout: 5000 }).catch(() => {});
+              await page.waitForTimeout(800);
+              console.log(`이름 카드 ${await input.count() ? '✗ 안 사라짐' : '✓ 치웠다'}`);
+            }
+          }
           // ★`exact: true` 가 필요하다. 새 칩의 라벨이 「조석·바람 **자세히 보기**」라
           //  느슨하게 잡으면 FAB 과 칩 **둘 다** 걸려 strict mode 로 죽는다(run 11 에서 실제로).
           await page.getByLabel('조석·바람', { exact: true }).click({ timeout: 30000 });
@@ -316,9 +332,13 @@ jobs:
             await page.locator('#ship-8206').click({ timeout: 8000 }).catch(() => {});
             await page.waitForTimeout(3000);
             const leak = await page.locator('div.fixed').filter({ has: page.getByLabel('닫기') })
-              .first().innerText().catch(() => '(카드를 못 읽음)');
+              .first().innerText().catch(() => '');
             console.log(`work_tasks 요청 ${hit.length}건 ${hit.length ? '✗ 샌다' : '✓ 안 나간다'}`);
-            console.log(`8206 카드에 「업무」 글자 ${leak.includes('업무') ? '✗ 있다' : '✓ 없다'}`);
+            // ★카드를 못 읽었으면 「없다」가 아니라 「못 쟀다」다. 예전에는 빈 글자에도
+            //  `includes('업무')` 가 false 라 **카드가 안 떠도 ✓ 가 찍혔다** — 유출 검사가
+            //  조용히 통과하는 그 함정이다. 안 본 것을 봤다고 하지 않는다.
+            console.log(`8206 카드에 「업무」 글자 `
+              + (!leak ? '⚠ 못 쟀다 (카드가 안 떴다)' : leak.includes('업무') ? '✗ 있다' : '✓ 없다'));
             await shot('05-hull8206');
           }
           await b.close();
