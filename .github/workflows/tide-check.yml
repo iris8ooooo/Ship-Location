@@ -28,6 +28,9 @@ on:
       #  공개 카드로 새는 것을 막는 가드를 갖고 있다(2026-09-06). 목록으로 관리하면 빠뜨린다.
       - 'src/**'
       - 'scripts/test-*.mjs'
+      # ★수집 크론만 고쳐도 `test-sync-schedule` [4] 가 돌아야 한다. 그 검사가 이 파일을
+      #  직접 읽어 앱 상수(`SYNC_HOURS_KST`)와 대조한다 — 안 도는 가드는 가드가 아니다.
+      - '.github/workflows/sync-safetyone.yml'
       - 'scripts/sync-tide.mjs'
       - 'scripts/fixtures/khoa-tide-*.json'
       - 'firestore.rules'
@@ -54,7 +57,8 @@ jobs:
           #  돌아서 나머지는 사람이 기억할 때만 돌았다 — **안 도는 가드는 가드가 아니다.**
           #  특히 `test-vessel-plan` [5] 는 사내 업무(work_tasks)가 공개 카드로 새는 것을
           #  막는 검사다(2026-09-06 유출 건). 하나라도 빨간불이면 set -e 로 여기서 멈춘다.
-          for t in test-vessel-plan test-sea test-visits-agg test-visitor-name \
+          for t in test-vessel-plan test-sea test-weather test-sync-schedule \
+                   test-visits-agg test-visitor-name \
                    test-berth-label test-bow-detect test-bow-plan test-bow-safety; do
             echo "── $t"
             node "scripts/$t.mjs" | tail -n 2
@@ -296,6 +300,27 @@ jobs:
             : page.locator('div.rounded-2xl').filter({ hasText: '조석' }).first().innerText()
           ).catch(() => '(패널 글자를 못 읽음)');
           console.log('열린 패널:\n' + txt);
+
+          // ── ★사내 업무(work_tasks) 유출 검사 — **맨 마지막에** 한다.
+          //  로컬 목 테스트(test-vessel-plan [5])는 「우리 코드가 요청하지 않는다」를 잰다.
+          //  여기서 재는 것은 「배포된 것이 실제로 요청하지 않는다」다 — 둘은 다른 질문이다.
+          //  ★순서가 중요하다: 이 검사는 페이지를 다시 연다. 앞에 두었더니 뒤의 호선 카드
+          //   검사가 마커를 못 눌러 통째로 건너뛰었다(run 25 에서 실제로 그랬다). 검사가
+          //   다른 검사를 조용히 죽이면 초록불이 거짓말이 된다 — 그래서 맨 끝이다.
+          //  실측 2026-09-06: 8206·8263·8300 에 업무가 떠 있었다. 그중 8206 을 열어 본다.
+          {
+            const hit = [];
+            page.on('request', r => { if (/work_tasks/.test(r.url())) hit.push(r.url().split('?')[0]); });
+            await page.goto(`${URL}?hull=8206`, { waitUntil: 'domcontentloaded' });
+            await page.waitForTimeout(6000);
+            await page.locator('#ship-8206').click({ timeout: 8000 }).catch(() => {});
+            await page.waitForTimeout(3000);
+            const leak = await page.locator('div.fixed').filter({ has: page.getByLabel('닫기') })
+              .first().innerText().catch(() => '(카드를 못 읽음)');
+            console.log(`work_tasks 요청 ${hit.length}건 ${hit.length ? '✗ 샌다' : '✓ 안 나간다'}`);
+            console.log(`8206 카드에 「업무」 글자 ${leak.includes('업무') ? '✗ 있다' : '✓ 없다'}`);
+            await shot('05-hull8206');
+          }
           await b.close();
           EOF
           node out/prod.mjs 2>&1 | tee out/prod.log
