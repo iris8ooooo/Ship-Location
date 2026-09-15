@@ -62,7 +62,7 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
   console.error('Firestore Error: ', JSON.stringify(errInfo));
   throw new Error(JSON.stringify(errInfo));
 }
-import { RotateCcw, RotateCw, X, MessageSquare, Plus, Waves, Info, ChevronUp, ChevronDown, Droplets, ArrowUpCircle, ArrowDownCircle, Lock, Unlock, ArrowLeftRight, BarChart3 } from 'lucide-react';
+import { RotateCcw, RotateCw, X, MessageSquare, Plus, Waves, Info, ChevronUp, ChevronDown, Droplets, ArrowUpCircle, ArrowDownCircle, Lock, Unlock, ArrowLeftRight, BarChart3, DownloadCloud } from 'lucide-react';
 import VisitsPanel from './components/VisitsPanel';
 import { recordVisit, recordVisitWithName, setVisitorName, nameAsked, NAME_MAX } from './lib/visits';
 import SeaChip from './components/SeaChip';
@@ -188,6 +188,20 @@ function usePublishedBottom(name: string) {
  * 지도에서 손을 뗀 뒤 이름 카드가 다시 나타나기까지(ms).
  * 짧으면 배를 보려고 미는 동안 계속 깜빡이고, 길면 이름을 적으러 갔다가 카드를 기다리게 된다.
  */
+/**
+ * 배 위치 수집을 **손으로 돌리는 곳**(깃허브 액션 실행 페이지).
+ *
+ * ★**토큰을 앱에 넣지 않는다.** 앱에서 액션을 직접 부르려면 깃허브 토큰이 필요한데,
+ *  이 번들은 공개다 — 개발자도구만 열면 누구나 읽고 워크플로를 마음대로 돌릴 수 있다.
+ *  링크로 보내면 **깃허브가 누구인지 확인**하므로 앱에는 비밀이 하나도 없다.
+ *  (대신 깃허브에 로그인돼 있지 않으면 실행 버튼이 안 보인다 — 알고 고른 트레이드오프다.)
+ *
+ * ★크론이 아니라 **수동 실행**이라 바로 돈다. 스케줄은 이 레포에서 1시간 40분~4시간 41분씩
+ *  밀리지만(실측), 수동 실행은 누른 그 초에 시작한다(실측: tide-check 09:52:24 → 09:52:24).
+ *  그래서 「지금 당장 위치를 맞추고 싶다」에 쓸 수 있는 유일한 즉시 경로다.
+ */
+const SYNC_RUN_URL = 'https://github.com/iris8ooooo/Ship-Location/actions/workflows/sync-safetyone.yml';
+
 const ASK_BACK_MS = 900;
 
 const DRAG_HOLD_MS = 600;
@@ -1767,6 +1781,20 @@ export default function App() {
           >
             <BarChart3 size={26} />
           </button>
+        )}
+        {/* 수집 돌리기. ★`<button>` 이 아니라 `<a target=_blank>` 인 이유 —
+            앱이 액션을 직접 부르려면 토큰이 필요하고 이 번들은 공개다(위 상수 주석).
+            홈화면 설치본에서 `target=_blank` 는 사파리로 나간다. */}
+        {appMode === 'admin' && (
+          <a
+            href={SYNC_RUN_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="수집 돌리기"
+            className="w-14 h-14 shadow-xl rounded-full flex items-center justify-center border transition-all active:scale-95 bg-white/95 backdrop-blur text-blue-600 border-gray-200"
+          >
+            <DownloadCloud size={26} />
+          </a>
         )}
       </div>
 
