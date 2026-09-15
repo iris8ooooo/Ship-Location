@@ -232,6 +232,33 @@ jobs:
               await shot('01b-namecard');
             }
           }
+          // ── ★이름 카드가 **배를 가리지 않는지** (2026-09-15 사용자 지시로 고친 것).
+          //  카드 바탕은 `pointer-events-none` 이라 그 아래 호선이 그대로 눌려야 하고,
+          //  지도를 만지는 동안에는 비켜야 한다. 여기서만 진짜로 잴 수 있다 — 이 잡은
+          //  빈 프로필이라 카드가 실제로 뜬다(로컬 개발 세션은 배가 한 척도 없다).
+          {
+            const r = await page.evaluate(() => {
+              const input = document.querySelector('input[placeholder="예: 홍길동"]');
+              if (!input) return null;
+              const card = input.closest('div.fixed');
+              const cb = card.getBoundingClientRect(), ib = input.getBoundingClientRect();
+              const at = (x, y) => { const e = document.elementFromPoint(x, y); return e ? (card.contains(e) ? 'card' : 'map') : 'none'; };
+              return { text: at(cb.x + cb.width / 2, cb.y + 14), input: at(ib.x + ib.width / 2, ib.y + ib.height / 2) };
+            });
+            if (!r) {
+              console.log('이름 카드 통과검사: 못 쟀다 (카드가 안 떴다)');
+            } else {
+              console.log(`카드 글자 아래 탭 → ${r.text === 'map' ? '✓ 지도가 받는다' : '✗ 카드가 막는다'}`);
+              console.log(`입력칸 탭 → ${r.input === 'card' ? '✓ 그대로 받는다' : '✗ 못 받는다'}`);
+              await page.mouse.move(195, 420); await page.mouse.down();
+              await page.waitForTimeout(260);
+              const during = await page.evaluate(() => document.querySelector('input[placeholder="예: 홍길동"]')
+                ?.closest('div.fixed')?.style.opacity);
+              await page.mouse.up();
+              console.log(`지도를 만지는 동안 → ${during === '0' ? '✓ 비킨다' : '✗ 안 비킨다'}`);
+              await page.waitForTimeout(1400);
+            }
+          }
           // ── ★이름 카드를 치운다. 안 치우면 아래 호선 카드 검사가 **조용히 안 돈다.**
           //  이 잡은 빈 프로필이라 카드가 늘 떠 있고, 카드는 y96~194 에 화면 폭을 거의 다
           //  써서 지도 위쪽 마커를 덮는다. 그 위를 누르면 Playwright 가 10초를 꽉 채우고

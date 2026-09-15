@@ -184,6 +184,12 @@ function usePublishedBottom(name: string) {
   return ref;
 }
 
+/**
+ * 지도에서 손을 뗀 뒤 이름 카드가 다시 나타나기까지(ms).
+ * 짧으면 배를 보려고 미는 동안 계속 깜빡이고, 길면 이름을 적으러 갔다가 카드를 기다리게 된다.
+ */
+const ASK_BACK_MS = 900;
+
 const DRAG_HOLD_MS = 600;
 /** 꾹 누르는 동안 이만큼(px) 움직이면 끌기가 아니라 지도 이동·핀치로 본다. */
 const DRAG_HOLD_SLOP = 8;
@@ -233,6 +239,49 @@ export default function App() {
   const [askName, setAskName] = useState(false);
   /** 이름 카드의 아래끝. 오른쪽 FAB 열이 이 값을 보고 비킨다(아래 주석). */
   const askRef = usePublishedBottom('--ask-b');
+  /**
+   * ★이름 카드가 **배를 가리지 않게** 한다 (2026-09-15 사용자 지시: 「이름 카드가 배 가리는 것도 고쳐」).
+   *
+   * 카드는 화면 폭을 거의 다 쓰는 띠라서, 그 밑에 든 호선은 **보이지도 눌리지도 않았다.**
+   * CLAUDE.md 에 「지도 자체(팬·줌·배 선택)는 계속 된다」고 적어 뒀는데 **카드 밑의 배는
+   * 예외**였다 — 프로덕션 실측(run 31)에서 마커 클릭이 10초 타임아웃으로 죽었고, 그 탓에
+   * 호선 카드 검사 넷이 통째로 건너뛰어졌다.
+   *
+   * 고침 둘:
+   *  ① **탭이 통과한다** — 카드 바탕은 `pointer-events-none`, 입력칸·저장 버튼만 `auto`.
+   *    글자 아래 있는 배는 그냥 눌린다.
+   *  ② **만지는 동안 비킨다** — 지도를 건드리면 투명해졌다가 손을 떼고 잠시 뒤 돌아온다.
+   *    ①만으로는 「안 가린다」가 아니라 「누를 수는 있다」에 그친다.
+   *
+   * ★React 상태로 두지 않고 **DOM 에 직접 쓴다.** 팬·핀치 도중 리렌더가 나면 이 레포는
+   *  손가락 밑 노드가 갈려 제스처가 한 프레임 만에 죽은 적이 있다(`dangerouslySetInnerHTML` 사건).
+   *  `opacity` 만 건드린다 — `will-change`·`translate3d` 는 쓰지 않는다(GPU 승격 금지 규칙).
+   */
+  useEffect(() => {
+    if (!askName) return;
+    const el = askRef.current;
+    if (!el) return;
+    let back = 0;
+    const down = (e: PointerEvent) => {
+      if (el.contains(e.target as Node)) return;   // 카드 자체를 만지는 중이면 그대로 둔다
+      window.clearTimeout(back);
+      el.style.opacity = '0';
+    };
+    const up = () => {
+      window.clearTimeout(back);
+      back = window.setTimeout(() => { el.style.opacity = ''; }, ASK_BACK_MS);
+    };
+    window.addEventListener('pointerdown', down, true);
+    window.addEventListener('pointerup', up, true);
+    window.addEventListener('pointercancel', up, true);
+    return () => {
+      window.clearTimeout(back);
+      el.style.opacity = '';
+      window.removeEventListener('pointerdown', down, true);
+      window.removeEventListener('pointerup', up, true);
+      window.removeEventListener('pointercancel', up, true);
+    };
+  }, [askName]);
   const [nameInput, setNameInput] = useState('');
   const [bannerOpen, setBannerOpen] = useState(false);
   const [infoTab, setInfoTab] = useState<'tide' | 'wind'>('tide');
@@ -1742,7 +1791,10 @@ export default function App() {
       {askName && (
         <div
           ref={askRef}
-          className="fixed left-2 right-2 top-24 z-[60] mx-auto max-w-sm rounded-2xl bg-white/97 backdrop-blur shadow-xl border border-gray-200 px-4 py-3">
+          /* ★`pointer-events-none` — 카드 바탕이 지도를 먹지 않는다. 글자 아래 있는 호선은
+             그냥 눌린다. 받아야 하는 것(입력칸·저장)만 아래에서 `auto` 로 되살린다.
+             `transition-opacity` 는 위 useEffect 가 만지는 동안 비켜 주는 그 전환이다. */
+          className="fixed left-2 right-2 top-24 z-[60] mx-auto max-w-sm rounded-2xl bg-white/97 backdrop-blur shadow-xl border border-gray-200 px-4 py-3 pointer-events-none transition-opacity duration-200">
           <p className="text-[13px] text-gray-700 leading-relaxed">
             데이터베이스가 업데이트 되었습니다. <b>이름을 적어주세요.</b>
           </p>
@@ -1752,14 +1804,14 @@ export default function App() {
               value={nameInput}
               onChange={e => setNameInput(e.target.value.slice(0, NAME_MAX))}
               placeholder="예: 홍길동"
-              className="min-w-0 flex-1 border-2 border-gray-300 px-3 py-2 rounded-lg text-[15px] text-gray-800 focus:border-blue-500 focus:outline-none"
+              className="pointer-events-auto min-w-0 flex-1 border-2 border-gray-300 px-3 py-2 rounded-lg text-[15px] text-gray-800 focus:border-blue-500 focus:outline-none"
               onKeyDown={e => {
                 if (e.key === 'Enter' && nameInput.trim()) { setVisitorName(nameInput); recordVisitWithName(); setAskName(false); }
               }}
             />
             <button
               onClick={() => { if (nameInput.trim()) { setVisitorName(nameInput); recordVisitWithName(); setAskName(false); } }}
-              className="shrink-0 bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 rounded-lg"
+              className="pointer-events-auto shrink-0 bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 rounded-lg"
             >
               저장
             </button>
