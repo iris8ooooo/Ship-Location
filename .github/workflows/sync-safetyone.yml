@@ -190,6 +190,40 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # ★★**실패도 앱에 남긴다** (2026-09-20).
+      #  9/16 비번 변경으로 수집이 **15회 연속 실패**했는데 나흘 반 동안 아무한테도
+      #  안 알려졌다. 심장박동을 **성공했을 때만** 남겨서, 앱이 알 수 있는 것은
+      #  「마지막 성공이 언제였나」뿐이었다 — 「왜 안 되는지」는 기록 자체가 없었다.
+      #  조석 수집에 이미 적용한 규칙과 같다:
+      #  **「못 받았다는 기록에는 왜 못 받았는지가 같이 있어야 한다」**.
+      #
+      #  ★남기는 것은 **코드뿐**이다(`login`·`connect`·`parse`·`other`).
+      #   `meta/safetyone` 은 공개 읽기인데 사유 문자열에는 `접속 불가: <주소>` 처럼
+      #   **사내 주소가 섞여 들어온다.** 글귀는 앱이 코드로부터 만든다.
+      #  ★`merge: true` 로 쓴다 — `lastSuccess` 를 지우면 룰(hasAll)에도 걸리고
+      #   「마지막으로 성공한 게 언제인가」도 잃는다.
+      - name: Tell the app the sync failed (code only, no message)
+        if: failure() && steps.precheck.outputs.ready == 'true'
+        continue-on-error: true
+        run: |
+          node --input-type=module <<'JS'
+          import { readFileSync } from 'node:fs';
+          import { initializeApp } from 'firebase/app';
+          import { getFirestore, doc, setDoc } from 'firebase/firestore';
+          let code = 'other';
+          try { code = JSON.parse(readFileSync('out/fail.json', 'utf8')).code || 'other'; } catch { /* 코드가 없으면 other */ }
+          const cfg = JSON.parse(readFileSync('firebase-applet-config.json', 'utf8'));
+          const db = getFirestore(initializeApp(cfg), cfg.firestoreDatabaseId);
+          try {
+            await setDoc(doc(db, 'meta', 'safetyone'),
+                         { lastFailure: Date.now(), failCode: code }, { merge: true });
+            console.log(`앱에 실패를 알렸다 — code=${code}`);
+          } catch (e) {
+            console.log(`(실패 기록 못 씀: ${e?.code ?? e})`);
+          }
+          process.exit(0);
+          JS
+
       # 실패 시 화면 "구조" 만 남긴다 — 다음 클로드 세션이 이걸 읽고
       # 사용자 없이 셀렉터를 고친다.
       #
