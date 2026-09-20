@@ -18,7 +18,7 @@ import { readFileSync } from 'node:fs';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, connectFirestoreEmulator, collection, getDocs, doc, setDoc, updateDoc, addDoc } from 'firebase/firestore';
 import { parseListText, planMoves, BERTH_LABEL, berthLabelAt } from '../src/lib/safetyone-match.mjs';
-import { residualMedian, namedRowsFromCoords, MAX_RESIDUAL, tmToYard } from '../src/lib/yard-transform.mjs';
+import { residualMedian, residualSettled, namedRowsFromCoords, MAX_RESIDUAL, tmToYard } from '../src/lib/yard-transform.mjs';
 import { bowByHull, unpackMask, diagnose, bowFromHeading } from '../src/lib/bow-detect.mjs';
 
 const args = process.argv.slice(2);
@@ -67,8 +67,12 @@ const live = new Map();
 if (capture?.kind === 'coords') {
   // ★박아 둔 변환식이 아직 맞는지 먼저 잰다. 도면을 다시 그렸거나 세이프티원이 좌표계를
   //  바꿨으면 여기서 걸린다 — 어긋난 변환으로 배를 옮기는 것이 이 프로젝트의 가장 큰 사고였다.
-  const q = residualMedian(rows, live);
-  console.log(`변환식 검증 — 짝지은 배 ${q.n}척 · 잔차 중앙값 ${q.median.toFixed(1)}px (허용 ${MAX_RESIDUAL}px)`);
+  // ★판정은 **선석이 그대로인 배**(안 움직인 배)로만 한다. 전체 잔차는 수집이 멈춘 동안
+  //  배가 움직인 만큼 같이 커져서, 오래 멈출수록 복구가 막히는 구조였다(yard-transform 주석).
+  const q = residualSettled(rows, live);
+  const all = residualMedian(rows, live);
+  console.log(`변환식 검증 — 제자리 ${q.n}척 잔차 중앙값 ${q.median.toFixed(1)}px (허용 ${MAX_RESIDUAL}px)`
+    + ` · 참고: 전체 ${all.n}척 ${all.median.toFixed(1)}px (움직인 배가 섞여 있다)`);
   // 짝이 몇 척뿐이면 중앙값에 의미가 없다 — 우연히 맞은 한 척으로 변환식 전체를 승인하게 된다.
   if (q.n < 8 || !(q.median <= MAX_RESIDUAL)) {
     console.error('변환식이 지금 지도와 안 맞는다. 아무것도 쓰지 않는다.');

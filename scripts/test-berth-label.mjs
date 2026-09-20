@@ -8,6 +8,7 @@
  *  그쪽은 이 문자열을 **그대로 찍는다** — 잘못된 선석이 그대로 현장에 나간다.
  */
 import { BERTH_LABEL, BERTH_SLOTS, berthLabelAt, quaySplits, berthOfPos } from '../src/lib/safetyone-match.mjs';
+import { TM_TO_YARD, tmToYard, residualMedian, residualSettled, MAX_RESIDUAL } from '../src/lib/yard-transform.mjs';
 
 let fail = 0;
 const ok = (c, m) => { console.log(`  ${c ? '✅' : '❌'} ${m}`); if (!c) fail++; };
@@ -65,6 +66,74 @@ for (const [hull, x, want] of [
 ]) {
   const id = x < 400 ? 'quay2' : 'quay1';
   ok(berthLabelAt(id, { x }) === want, `${hull} (x=${x}) → ${berthLabelAt(id, { x })}`);
+}
+
+console.log('\n[5] ★변환식 가드는 「안 움직인 배」로만 재야 한다 (2026-09-20)');
+{
+  // 야드 좌표 → TM. 가드를 실제 좌표로 돌려 보려면 역변환이 있어야 한다.
+  const T = TM_TO_YARD, det = T.a * T.e - T.b * T.d;
+  const yardToTm = (x, y) => {
+    const X = x - T.c, Y = y - T.f;
+    return { tmx: (T.e * X - T.b * Y) / det, tmy: (-T.d * X + T.a * Y) / det };
+  };
+  // 왕복이 맞는지부터 — 이게 틀리면 아래 전부 무의미하다.
+  { const t = yardToTm(500, 500), b = tmToYard(t.tmx, t.tmy);
+    ok(Math.hypot(b.x - 500, b.y - 500) < 0.01, '역변환 왕복 오차 0'); }
+
+  /** 야드 좌표 목록 → rows(수집) · live(지도) */
+  const mk = (list) => ({
+    rows: list.map(([hull, x, y]) => ({ hull, ...yardToTm(x, y) })),
+    live: new Map(list.map(([hull, , , lx, ly]) => [hull, { x: lx, y: ly }])),
+  });
+
+  // 22척을 실제 슬롯 자리에 놓는다(선석마다 골고루).
+  const spots = [];
+  for (const [id, slots] of Object.entries(BERTH_SLOTS)) {
+    if (id === 'waiting') continue;
+    for (const s of slots.slice(0, 4)) spots.push([id, s.x, s.y]);
+  }
+  const base = spots.slice(0, 22).map(([, x, y], i) => [`9${String(100 + i)}`, x, y, x, y]);
+
+  // ① 아무도 안 움직였다 → 둘 다 통과
+  {
+    const { rows, live } = mk(base);
+    ok(residualSettled(rows, live).median < 1, '제자리면 잔차 0 — 통과');
+  }
+
+  // ② ★수집이 오래 멈춰 **절반이 다른 선석으로 옮겨 갔다**.
+  //    옛 검사(전체)는 그걸 「변환식이 깨졌다」로 읽어 **복구를 막는다.**
+  {
+    const moved = base.map((r, i) => {
+      if (i % 2) return r;                       // 절반은 제자리(약간의 손보정 8px)
+      const [h, , , lx, ly] = r;
+      return [h, lx + 260, ly + 150, lx, ly];    // 나머지 절반은 실제로 멀리 이동
+    }).map(([h, x, y, lx, ly], i) => i % 2 ? [h, x + 6, y + 5, lx, ly] : [h, x, y, lx, ly]);
+    const { rows, live } = mk(moved);
+    const oldQ = residualMedian(rows, live), newQ = residualSettled(rows, live);
+    ok(!(oldQ.median <= MAX_RESIDUAL),
+       `옛 검사(전체)는 막는다 — 중앙값 ${oldQ.median.toFixed(1)}px > ${MAX_RESIDUAL} ★이게 복구를 막던 버그`);
+    ok(newQ.n >= 8 && newQ.median <= MAX_RESIDUAL,
+       `새 검사(제자리 ${newQ.n}척)는 통과 — ${newQ.median.toFixed(1)}px ≤ ${MAX_RESIDUAL}`);
+  }
+
+  // ③ ★진짜 위험은 그대로 막아야 한다: 좌표가 **통째로** 34.4px 밀린 경우.
+  //    (CLAUDE.md 실측 — 이 정도면 8283·8300 이 반대 도크로 넘어간다)
+  {
+    const shifted = base.map(([h, x, y, lx, ly]) => [h, x + 28, y + 20, lx, ly]);
+    const { rows, live } = mk(shifted);
+    const newQ = residualSettled(rows, live);
+    ok(!(newQ.n >= 8 && newQ.median <= MAX_RESIDUAL),
+       `통째로 34.4px 밀리면 새 검사도 막는다 (제자리 ${newQ.n}척 · ${newQ.median.toFixed(1)}px)`);
+  }
+
+  // ④ 크게 깨지면 표본이 말라 n 검사에 걸린다
+  {
+    const broken = base.map(([h, x, y, lx, ly]) => [h, x + 400, y + 300, lx, ly]);
+    const { rows, live } = mk(broken);
+    const newQ = residualSettled(rows, live);
+    ok(!(newQ.n >= 8 && newQ.median <= MAX_RESIDUAL),
+       `크게 깨지면 막는다 (제자리 ${newQ.n}척 — 8척 미만이거나 잔차 초과)`);
+  }
 }
 
 console.log(fail === 0 ? '\n전부 통과' : `\n${fail}건 실패`);

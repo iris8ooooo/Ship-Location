@@ -9,6 +9,7 @@ import { db, auth } from './firebase';
 import YardMap, { YARD_REGIONS, YARD_W, YARD_H, YARD_ROTS,
   contentSize, mapTransform, mapToContent, contentToMap, screenDeltaToMap,
   fullFit, type YardRegion, type YardRot } from './components/YardMap';
+import MapPhoto, { type Photo } from './components/MapPhoto';
 import { IconUpdateNotice } from './components/IconUpdateNotice';
 import { InstallGuide } from './components/InstallGuide';
 
@@ -62,7 +63,7 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
   console.error('Firestore Error: ', JSON.stringify(errInfo));
   throw new Error(JSON.stringify(errInfo));
 }
-import { RotateCcw, RotateCw, X, MessageSquare, Plus, Waves, Info, ChevronUp, ChevronDown, Droplets, ArrowUpCircle, ArrowDownCircle, Lock, Unlock, ArrowLeftRight, BarChart3, DownloadCloud } from 'lucide-react';
+import { RotateCcw, RotateCw, X, MessageSquare, Plus, Waves, Info, ChevronUp, ChevronDown, Droplets, ArrowUpCircle, ArrowDownCircle, Lock, Unlock, ArrowLeftRight, BarChart3, DownloadCloud, Image as ImageIcon } from 'lucide-react';
 import VisitsPanel from './components/VisitsPanel';
 import { recordVisit, recordVisitWithName, setVisitorName, nameAsked, NAME_MAX } from './lib/visits';
 import SeaChip from './components/SeaChip';
@@ -225,6 +226,17 @@ export default function App() {
   const [syncText, setSyncText] = useState('');
   const [syncOpen, setSyncOpen] = useState(false);
   const [syncPlan, setSyncPlan] = useState<import('./lib/safetyone-match.mjs').SyncPlan | null>(null);
+  /**
+   * 사진 지도 붙여넣기 (2026-09-20 사용자 지시: 「모바일이든 피시든 사진지도 붙여넣기 하게 해」).
+   * 사진은 **이 기기 안에만** 산다 — 파이어스토어에도 서버에도 안 올린다(MapPhoto 주석).
+   */
+  const [photo, setPhoto] = useState<Photo | null>(null);
+  /** 켜면 끌기·핀치가 지도가 아니라 **사진**을 움직인다. */
+  const [align, setAlign] = useState(false);
+  const photoRef = useRef<HTMLImageElement>(null);
+  /** 뷰포트에 한 번만 붙는 네이티브 제스처 처리기가 읽는다 — 상태로는 거기까지 안 간다. */
+  const alignRef = useRef(false);
+  alignRef.current = align;
   /** 마지막 수집 심장박동(meta/safetyone). 룰 배포 전이면 null 로 남아 숨는다. */
   const [lastSync, setLastSync] = useState<number | null>(null);
   /** 뷰어 카드에 보여줄 "그 호선의 오늘"(공정관리 Supabase). 'loading'/'error' 구분. */
@@ -369,6 +381,8 @@ export default function App() {
 
     if (node) {
       const onWheel = (e: WheelEvent) => {
+        // ★사진을 맞추는 중이면 지도는 가만히 둔다 — 그 제스처는 MapPhoto 가 받는다.
+        if (alignRef.current) return;
         e.preventDefault();                       // 기본 스크롤이 얹히지 않게
         userMovedRef.current = true;
         const rect = node.getBoundingClientRect();
@@ -386,6 +400,8 @@ export default function App() {
       const shipBusy = () => !!(holdRef.current || draggingRef.current || panRef.current);
 
       const onTouchStartNative = (e: TouchEvent) => {
+        // ★사진을 맞추는 중이면 지도는 가만히 둔다 — 그 제스처는 MapPhoto 가 받는다.
+        if (alignRef.current) return;
         if (e.touches.length === 1 && !shipBusy()) {
           pan = { x: e.touches[0].clientX, y: e.touches[0].clientY };
         } else {
@@ -393,6 +409,8 @@ export default function App() {
         }
       };
       const onTouchMove = (e: TouchEvent) => {
+        // ★사진을 맞추는 중이면 지도는 가만히 둔다 — 그 제스처는 MapPhoto 가 받는다.
+        if (alignRef.current) return;
         if (e.touches.length >= 2) {
           e.preventDefault();                     // 핀치 중 기본 스크롤/줌 차단
           pan = null;
@@ -430,6 +448,8 @@ export default function App() {
         }
       };
       const onTouchEndNative = (e: TouchEvent) => {
+        // ★사진을 맞추는 중이면 지도는 가만히 둔다 — 그 제스처는 MapPhoto 가 받는다.
+        if (alignRef.current) return;
         // ★기준 버리기를 React 의 onTouchEnd 에만 맡기면 안 된다. 그건 touchcancel 을
         //  안 받는다 — 취소로 끝난 핀치의 기준이 남아 다음 핀치가 옛 기준으로 튄다.
         if (e.touches.length < 2) { pinchRef.current = null; pinchingRef.current = false; }
@@ -1403,6 +1423,7 @@ export default function App() {
 
 
   const handleBackgroundPointerDown = (e: ReactPointerEvent) => {
+    if (alignRef.current) { mapTapRef.current = null; return; }   // 사진 맞추는 중
     // 지도를 **톡 친 것**인지 재기 시작한다 (아래 handleMapPointerUp 이 판정한다).
     // ★예전에는 여기서 곧바로 선택을 풀었다. 그러면 **지도를 밀기 시작하는 순간** 호선 카드가
     //  닫혀, 배가 어디 있는지 보려고 지도를 미는 것 자체가 안 됐다. 판정은 놓을 때 한다.
@@ -1435,6 +1456,53 @@ export default function App() {
       setSelectedZoneId(null);
     }
   };
+
+  /**
+   * 사진 지도를 받는다. **붙여넣기·사진 고르기·끌어놓기 셋 다 여기로 온다** —
+   * 길이 셋이어도 받는 곳은 하나여야 한다(길마다 따로 만들면 한 군데만 고치게 된다).
+   *
+   * ★모바일에서 확실히 되는 길은 **「사진 고르기」**다. `<input type="file" accept="image/*">`
+   *  는 아이폰·안드로이드 둘 다 사진첩과 카메라를 띄운다(web.dev media-capturing-images).
+   *  붙여넣기는 아이폰에서 **편집 가능한 칸을 꾹 눌러 「붙여넣기」를 골라야** 열린다
+   *  (WebKit: 사용자가 그 UI 를 직접 눌러야 클립보드가 열린다) — 그래서 옆에 그 칸을 둔다.
+   */
+  const photoUrlRef = useRef<string | null>(null);
+  const loadPhoto = useCallback((file?: File | null) => {
+    if (!file || !file.type.startsWith('image/')) return;
+    const url = URL.createObjectURL(file);
+    const im = new Image();
+    im.onload = () => {
+      if (photoUrlRef.current) URL.revokeObjectURL(photoUrlRef.current);
+      photoUrlRef.current = url;
+      setPhoto({ url, w: im.naturalWidth, h: im.naturalHeight });
+      setAlign(true);            // 올리자마자 맞추기부터 — 엉뚱한 자리에 깔린 채 두지 않는다
+      setOpenPanel(null);        // 패널이 지도를 덮고 있으면 맞출 수가 없다
+    };
+    im.onerror = () => URL.revokeObjectURL(url);
+    im.src = url;
+  }, []);
+
+  const clearPhoto = useCallback(() => {
+    setAlign(false);
+    setPhoto(null);
+    if (photoUrlRef.current) URL.revokeObjectURL(photoUrlRef.current);
+    photoUrlRef.current = null;
+  }, []);
+
+  /** 붙여넣기(Ctrl+V / 꾹 눌러 붙여넣기). 그림이 없는 붙여넣기는 건드리지 않는다 —
+   *  아래 글자 리스트 칸에 텍스트를 붙이는 것을 막으면 안 된다. */
+  useEffect(() => {
+    if (appMode !== 'admin' || !syncOpen) return;
+    const onPaste = (e: ClipboardEvent) => {
+      const item = [...(e.clipboardData?.items ?? [])].find(i => i.type.startsWith('image/'));
+      const file = item?.getAsFile();
+      if (!file) return;
+      e.preventDefault();
+      loadPhoto(file);
+    };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  }, [appMode, syncOpen, loadPhoto]);
 
   /** 이름을 받고 관리자로 들어간다. 이름을 받으려던 이유가 그것이다. */
   const confirmName = () => {
@@ -1689,11 +1757,85 @@ export default function App() {
           </button>
           {syncOpen && (
             <div className="col-span-2 md:col-span-1 flex flex-col gap-2">
+              {/* ── 사진 지도 ──────────────────────────────────────────────
+                  ★**글자 리스트는 위치를 말해 주지 않는다** (2026-09-20 사용자 지적:
+                   「3중점검 리스트보기는 위치 보기가 아니야」). 리스트가 주는 것은
+                   `2안벽` 같은 구간 이름뿐이라, 그걸로 옮기면 배가 그 선석의 **미리 정해 둔
+                   슬롯**에 들어갈 뿐 실제로 붙어 있는 자리로 가지 않는다.
+                   사진은 자리를 그대로 보여준다 — 깔아 놓고 그 위로 배를 끌면 된다.
+                  ★사진 **해석은 하지 않는다.** 사진에서 호선번호를 읽어 자동으로 놓으려면
+                   글자 인식과 사진↔지도 정합이 둘 다 맞아야 하는데, 틀려도 에러가 아니라
+                   **그럴듯한 오답**으로 나온다. 좌표를 정확히 가져오는 길은 수집이 이미 한다. */}
+              <div
+                onDragOver={e => e.preventDefault()}
+                onDrop={e => { e.preventDefault(); loadPhoto(e.dataTransfer.files?.[0]); }}
+                className="rounded border border-gray-300 bg-white p-2 flex flex-col gap-2"
+              >
+                {!photo ? (
+                  <>
+                    <div className="text-xs text-gray-600 leading-snug">
+                      세이프티원 <b>지도 화면</b>을 캡처해서 올리면 지도 위에 반투명으로 깔린다 — 그 위로 배를 끌어 맞춘다.
+                      <span className="text-gray-500"> 사진은 이 기기 밖으로 안 나간다.</span>
+                    </div>
+                    <div className="flex gap-2">
+                      <label className="min-h-[44px] px-3 flex items-center justify-center gap-1.5 rounded bg-teal-600 hover:bg-teal-700 active:bg-teal-800 text-white text-sm font-bold cursor-pointer shrink-0">
+                        <ImageIcon size={18} /> 사진 고르기
+                        <input
+                          type="file" accept="image/*" className="hidden"
+                          onChange={e => { loadPhoto(e.target.files?.[0]); e.target.value = ''; }}
+                        />
+                      </label>
+                      {/* 붙여넣기 칸. 아이폰은 **편집 가능한 칸을 꾹 눌러야** 「붙여넣기」가 뜬다. */}
+                      <div className="relative flex-1 min-w-0">
+                        <div
+                          contentEditable
+                          suppressContentEditableWarning
+                          aria-label="사진 붙여넣기"
+                          className="min-h-[44px] w-full rounded border border-dashed border-gray-400 outline-none focus:border-teal-600"
+                        />
+                        <span className="absolute inset-0 flex items-center px-2 text-xs text-gray-500 pointer-events-none">
+                          여기를 꾹 눌러 붙여넣기
+                        </span>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setAlign(a => !a)}
+                        className={`min-h-[44px] px-3 rounded text-sm font-bold text-white ${align ? 'bg-gray-500 hover:bg-gray-600' : 'bg-teal-600 hover:bg-teal-700'}`}
+                      >
+                        {align ? '맞추기 끝' : '사진 맞추기'}
+                      </button>
+                      <button
+                        onClick={clearPhoto}
+                        className="min-h-[44px] px-3 rounded text-sm font-bold bg-gray-200 hover:bg-gray-300 text-gray-800"
+                      >
+                        사진 치우기
+                      </button>
+                    </div>
+                    {/* ★투명도는 노드에 **직접** 쓴다 — 슬라이더 한 칸마다 앱을 다시 그리면
+                        지도 SVG 와 배 스물몇 척이 같이 다시 그려진다. */}
+                    <label className="flex items-center gap-2 text-xs text-gray-600">
+                      투명도
+                      <input
+                        type="range" min={10} max={100} defaultValue={55}
+                        onInput={e => {
+                          const v = Number((e.target as HTMLInputElement).value) / 100;
+                          if (photoRef.current) photoRef.current.style.opacity = String(v);
+                        }}
+                        className="flex-1 min-w-0"
+                      />
+                    </label>
+                  </>
+                )}
+              </div>
               <textarea
                 value={syncText}
                 onChange={e => { setSyncText(e.target.value); setSyncPlan(null); }}
                 rows={5}
-                placeholder={'세이프티원 3중점검 리스트 보기를 복사해 그대로 붙여넣기\n(호선번호와 위치가 든 줄이면 표 전체여도 된다)'}
+                placeholder={'글자 리스트 — 세이프티원 3중점검 리스트 보기를 복사해 그대로 붙여넣기\n(선석 이름까지만 맞춘다. 정확한 자리는 위의 사진으로)'}
                 className="p-2 text-sm border border-gray-300 rounded w-full text-gray-800 font-mono"
               />
               {syncPlan && (
@@ -2002,6 +2144,51 @@ export default function App() {
         />
       )}
 
+      {/* ★사진을 맞추는 동안에는 지도가 **손에 반응하지 않는 것처럼** 보인다(끌면 사진이
+          움직인다). 그러니 지금 무슨 모드인지와 빠져나가는 길을 화면이 말해 줘야 한다 —
+          안 그러면 「지도가 고장났다」로 읽힌다. 자리는 아래에 쌓이는 것들과 같은
+          `--dock-h` 규칙을 쓴다(지역 버튼 줄을 파고들지 않게). */}
+      {photo && appMode === 'admin' && (
+        <div
+          className={`fixed left-2 right-2 z-[70] mx-auto max-w-sm rounded-2xl shadow-xl px-3 py-2 flex items-center gap-2 ${
+            align ? 'bg-teal-600 text-white' : 'bg-white/95 backdrop-blur text-gray-800 border border-gray-200'}`}
+          style={{ bottom: 'calc(3rem + var(--dock-h, 4.5rem) + 0.5rem + env(safe-area-inset-bottom))' }}
+        >
+          {align ? (
+            <>
+              <div className="text-xs leading-snug flex-1 min-w-0">
+                <b>사진 맞추는 중</b> — 끌어서 옮기고, 두 손가락으로 크기·각도.
+              </div>
+              <button
+                onClick={() => setAlign(false)}
+                className="shrink-0 min-w-[44px] min-h-[44px] px-3 rounded-lg bg-white text-teal-700 text-sm font-bold"
+              >
+                다 맞췄다
+              </button>
+            </>
+          ) : (
+            <>
+              <div className="text-xs leading-snug flex-1 min-w-0">
+                <b>사진 깔림</b> — 배를 꾹 눌러 사진 위로 옮긴다.
+              </div>
+              <button
+                onClick={() => setAlign(true)}
+                className="shrink-0 min-h-[44px] px-3 rounded-lg bg-teal-600 text-white text-sm font-bold"
+              >
+                맞추기
+              </button>
+              <button
+                onClick={clearPhoto}
+                aria-label="사진 치우기"
+                className="shrink-0 w-11 h-11 rounded-lg bg-gray-100 text-gray-600 flex items-center justify-center"
+              >
+                <X size={20} />
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
       {/* Viewport */}
       <div 
         ref={attachViewport}
@@ -2020,10 +2207,18 @@ export default function App() {
           <div 
             ref={containerRef}
             style={{ width: YARD_W, height: YARD_H, transform: mapTransform(zoom, rot) }}
-            className="relative origin-top-left"
+            /* ★사진을 맞추는 동안에는 지도 안쪽이 이벤트를 안 받는다 — 배를 잡거나 선택하는
+               일 없이 사진만 움직인다. 이벤트는 그대로 뷰포트로 올라가고 MapPhoto 가 받는다. */
+            className={`relative origin-top-left ${align ? 'pointer-events-none' : ''}`}
             onClick={handleMapClick}
           >
             <YardMap zoom={zoom} />
+            {/* ★뷰어로 돌아가면 사진은 **사라진다.** 사내 화면 캡처이고 이 앱은 로그인이
+                없다 — 관리자가 켜 둔 채 뷰어로 넘어가면 그대로 아무나 보게 된다. */}
+            {photo && appMode === 'admin' && (
+              <MapPhoto photo={photo} imgRef={photoRef} viewport={viewportEl}
+                        zoom={zoom} rot={rot} align={align} />
+            )}
           {Object.keys(zones).map((id) => {
             const zone = zones[id];
             const isSelected = selectedZoneId === id;
