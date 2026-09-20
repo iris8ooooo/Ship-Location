@@ -89,5 +89,50 @@ console.log('\n[5] 경계 — lastDueAt 이 가리키는 시각');
      `그 직전까지는 → 아직 어제 17시`);
 }
 
+console.log('\n[6] ★수집이 죽으면 앱이 **왜 죽었는지** 말한다 (2026-09-20 사고)');
+{
+  // 실제로 일어난 일: 9/16 10:12 성공을 마지막으로 비번이 바뀌어 15회 연속 실패.
+  const ok916 = kst('2026-09-16T10:12');
+  const fail920 = kst('2026-09-20T07:50');   // 사장님이 버튼을 눌렀다가 실패한 그 시각
+
+  ok(S.syncIsBroken(ok916, fail920), '실패가 성공보다 새로우면 → 깨진 것');
+  ok(!S.syncIsBroken(fail920, ok916), '성공이 더 새로우면 → 되살아난 것 (빨갛게 두지 않는다)');
+  ok(S.syncIsBroken(null, fail920), '성공 기록이 아예 없고 실패만 있어도 → 깨진 것');
+  ok(!S.syncIsBroken(ok916, null), '실패 기록이 없으면 → 안 깨진 것');
+  ok(!S.syncIsBroken(null, null), '아무 기록도 없으면 → 안 깨진 것 (칩을 숨긴다)');
+
+  ok(S.syncFailLabel('login') === '로그인 안 됨', `login → ${S.syncFailLabel('login')}`);
+  ok(S.syncFailLabel('connect') === '접속 안 됨', `connect → ${S.syncFailLabel('connect')}`);
+  ok(S.syncFailLabel('parse') === '화면이 바뀜', `parse → ${S.syncFailLabel('parse')}`);
+  ok(S.syncFailLabel('처음보는코드') === '원인 미상', '모르는 코드가 와도 화면이 비지 않는다');
+  ok(S.syncFailLabel(undefined) === '원인 미상', '코드가 없어도 화면이 비지 않는다');
+
+  // ★옛 동작과의 차이 — 이게 나흘 반을 날린 그 구분이다.
+  //  옛 신호(syncIsStale)는 「오래됐다」까지만 말할 수 있고 **왜인지는 모른다.**
+  const now = kst('2026-09-20T12:00');
+  ok(S.syncIsStale(ok916, now), '옛 신호: 「오래됐다」는 말할 수 있다');
+  ok(S.syncIsBroken(ok916, fail920), '새 신호: 「죽었다」까지 말한다 — 둘은 다른 질문이다');
+}
+
+console.log('\n[7] ★실패 기록에 **사유 문자열을 싣지 않는다** — meta/safetyone 은 공개 읽기다');
+{
+  const src = readFileSync('scripts/scrape-safetyone.mjs', 'utf8');
+  // 앱으로 나가는 파일에는 코드만 담는다. reason 은 `접속 불가: ${e.message}` 처럼
+  // **사내 주소를 품는다** — 그게 공개 문서로 나가면 그 순간 유출이다.
+  const m = src.match(/fail\.json[^\n]*JSON\.stringify\(([^)]*)\)/);
+  ok(!!m, 'fail.json 을 쓰는 줄을 찾았다');
+  if (m) {
+    ok(/\{\s*code\s*\}/.test(m[1]), `담는 것은 code 뿐 (${m[1].trim()})`);
+    ok(!/reason|message|url|URL/.test(m[1]), '사유·주소를 같이 싣지 않는다');
+  }
+  // 워크플로도 같은 약속을 지켜야 한다 — 거기서 reason 을 읽어 쓰면 소용없다.
+  const yml = readFileSync('.github/workflows/sync-safetyone.yml', 'utf8');
+  const block = yml.slice(yml.indexOf('Tell the app the sync failed'));
+  ok(block.includes('failCode') && !/reason/.test(block.slice(0, 1600)),
+     '워크플로도 코드만 쓴다 (failCode · reason 안 씀)');
+  ok(/merge:\s*true/.test(block.slice(0, 1600)),
+     'merge 로 쓴다 — lastSuccess 를 지우지 않는다');
+}
+
 console.log(`\n${fail ? '❌' : '✅'} 통과 ${pass} · 실패 ${fail}`);
 process.exit(fail ? 1 : 0);

@@ -70,7 +70,7 @@ import SeaChip from './components/SeaChip';
 import WeatherFx from './components/WeatherFx';
 import { wmoToWx, windPushX, FX_START_DELAY_MS, type Wx } from './lib/weather';
 import { windTravelScreenDeg } from './lib/sea';
-import { syncIsStale } from './lib/sync-schedule';
+import { syncIsStale, syncIsBroken, syncFailLabel } from './lib/sync-schedule';
 import SeaSheet from './components/SeaSheet';
 import { useDragToClose } from './components/useDragToClose';
 
@@ -239,6 +239,9 @@ export default function App() {
   alignRef.current = align;
   /** 마지막 수집 심장박동(meta/safetyone). 룰 배포 전이면 null 로 남아 숨는다. */
   const [lastSync, setLastSync] = useState<number | null>(null);
+  /** ★**실패도 읽는다** (2026-09-20). 성공만 보면 앱이 할 수 있는 말이 「오래됐다」뿐이라,
+   *  9/16 비번 변경으로 수집이 15회 연속 죽은 것을 나흘 반 동안 아무도 몰랐다. */
+  const [syncFail, setSyncFail] = useState<{ at: number; code: string } | null>(null);
   /** 뷰어 카드에 보여줄 "그 호선의 오늘"(공정관리 Supabase). 'loading'/'error' 구분. */
   const [vesselPlan, setVesselPlan] = useState<VesselPlan | 'loading' | 'error' | null>(null);
   /** 공정관리에서 읽은 호선 명부 — 작업 호선(진하게) · DF 호선(초록).
@@ -787,8 +790,13 @@ export default function App() {
   // 수집 심장박동. 문서가 없거나 룰이 아직 안 열렸으면 조용히 숨긴다.
   useEffect(() => {
     const unsub = onSnapshot(doc(db, 'meta', 'safetyone'),
-      snap => setLastSync(snap.exists() ? ((snap.data() as any).lastSuccess ?? null) : null),
-      () => setLastSync(null));
+      snap => {
+        const d = snap.exists() ? (snap.data() as any) : null;
+        setLastSync(d?.lastSuccess ?? null);
+        setSyncFail(typeof d?.lastFailure === 'number'
+          ? { at: d.lastFailure, code: String(d.failCode ?? 'other') } : null);
+      },
+      () => { setLastSync(null); setSyncFail(null); });
     return () => unsub();
   }, []);
 
@@ -1634,7 +1642,17 @@ export default function App() {
               (칩에 shrink-0 이 없어서 「3중점검 25분 전」의 뒷부분이 잘렸다 — 사용자 보고) */}
           <div className="flex min-w-0 flex-1 items-center gap-2">
             <h4 className="shrink-0 font-bold text-sm text-gray-800">최근 업데이트</h4>
-            {lastSync !== null && (() => {
+            {/* ★★수집이 **죽었으면 그렇다고 말한다** (2026-09-20).
+                예전에는 실패해도 「위치 확인 4일 전」만 떴다 — 「오래됐다」와 「왜 안 되는지」는
+                다른 말이고, 그 구분이 없어서 나흘 반 동안 아무도 몰랐다.
+                ★글귀는 코드에서 만든다(`syncFailLabel`) — 사유 문자열을 그대로 쓰면
+                 사내 주소가 화면에 나온다. */}
+            {syncFail && syncIsBroken(lastSync, syncFail.at) && (
+              <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full whitespace-nowrap bg-red-100 text-red-700 font-bold">
+                수집 실패 — {syncFailLabel(syncFail.code)}
+              </span>
+            )}
+            {lastSync !== null && !(syncFail && syncIsBroken(lastSync, syncFail.at)) && (() => {
               // "몇 시간째 그대로" 와 "수집이 죽음" 이 구분돼야 한다.
               // 기준은 `sync-schedule.ts` 한 곳에서만 정한다 — 밤에는 다음 예정이
               // 아침 8시라 17시 값이 묵어도 정상이고, 아침 것을 거르면 그때 빨갛다.

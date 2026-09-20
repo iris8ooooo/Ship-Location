@@ -311,8 +311,17 @@ async function skeletonOf(frame) {
   }, NAV_WORDS);
 }
 
-async function bail(reason) {
+/**
+ * @param reason 사람이 읽을 사유(로그·아티팩트용). **여기엔 사내 주소가 섞일 수 있다.**
+ * @param code   앱에 전달할 사유 코드. ★코드만 파이어스토어로 간다 —
+ *               `meta/safetyone` 은 **공개 읽기**이고 `reason` 에는
+ *               `접속 불가: ${e.message}` 처럼 주소가 들어온다(2026-09-20).
+ */
+async function bail(reason, code = 'other') {
   console.error(`실패: ${reason}`);
+  // ★워크플로의 `if: failure()` 스텝이 이 파일을 읽어 앱에 남긴다.
+  //  못 써도 그냥 넘어간다 — 기록 때문에 수집이 더 시끄럽게 죽을 이유는 없다.
+  try { writeFileSync(`${dirname(outPath)}/fail.json`, JSON.stringify({ code })); } catch { /* 무시 */ }
   try {
     const frames = [];
     for (const f of page.frames()) {
@@ -341,7 +350,7 @@ async function bail(reason) {
 
 try {
   await page.goto(SAFETYONE_URL, { waitUntil: 'domcontentloaded', timeout: 45000 });
-} catch (e) { await bail(`접속 불가: ${e.message}`); }
+} catch (e) { await bail(`접속 불가: ${e.message}`, 'connect'); }
 await page.waitForTimeout(2500);
 
 // ── 로그인 ────────────────────────────────────────────────────────────────
@@ -351,7 +360,7 @@ if (await pw.count()) {
   const id = page.locator(
     'input[type="text"]:visible, input[type="email"]:visible, input:not([type]):visible'
   ).first();
-  if (!(await id.count())) await bail('로그인: 아이디 입력칸을 못 찾았다');
+  if (!(await id.count())) await bail('로그인: 아이디 입력칸을 못 찾았다', 'login');
   await id.fill(SAFETYONE_ID);
   await pw.fill(SAFETYONE_PW);
   // 로그인 버튼 후보 → 없으면 엔터.
@@ -361,7 +370,7 @@ if (await pw.count()) {
   if (await btn.count()) await btn.click(); else await pw.press('Enter');
   await page.waitForTimeout(4000);
   if (await page.locator('input[type="password"]').count()) {
-    await bail('로그인이 안 됐다 — 비밀번호 칸이 그대로 있다 (비번 오류거나 추가 인증)');
+    await bail('로그인이 안 됐다 — 비밀번호 칸이 그대로 있다 (비번 오류거나 추가 인증)', 'login');
   }
   console.log('로그인 성공');
 } else {
@@ -490,7 +499,7 @@ if (rows.length < 5) {
 }
 
 // 야드엔 보통 20척 이상 있다. 몇 척 안 잡혔으면 리스트가 안 펼쳐진 것이다.
-if (rows.length < 5) await bail(`행을 ${rows.length}개밖에 못 읽었다 — 리스트가 안 펼쳐졌거나 화면 구조가 바뀌었다`);
+if (rows.length < 5) await bail(`행을 ${rows.length}개밖에 못 읽었다 — 리스트가 안 펼쳐졌거나 화면 구조가 바뀌었다`, 'parse');
 
 // ③ 지도 캔버스에서 **뱃머리**를 읽는다.
 //  배 레이어의 angle 은 0/±90 두 값뿐이라 축밖에 말하지 않지만, 그림은 선수를
