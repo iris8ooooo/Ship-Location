@@ -70,3 +70,43 @@ export function lastDueAt(nowMs: number): number {
 export function syncIsStale(lastSyncMs: number, nowMs: number): boolean {
   return lastSyncMs < lastDueAt(nowMs);
 }
+
+/**
+ * ★★**수집이 죽으면 아무도 안 본다** (2026-09-20, 나흘 반 만에 발견).
+ *
+ * 9/16 10:12(KST) 이후 **15회 연속 실패**했는데 나흘 반 동안 아무 일도 일어나지 않았다.
+ * 워크플로는 빨갛게 죽어 있었지만 **그 빨간불이 사용자에게 도달하는 길이 없었다** —
+ * 사장님이 9/20 아침에 수집 버튼을 눌렀고 그것도 실패했는데, 화면은 여전히
+ * 「위치 확인 N일 전」만 말했다. 「오래됐다」와 **「왜 안 되는지」**는 다른 말이다.
+ *
+ * 원인은 구조였다: 심장박동을 **성공했을 때만** 남겼다. 그래서 앱이 알 수 있는 것은
+ * 「마지막 성공이 언제였나」뿐이고, 실패는 기록 자체가 없었다.
+ * → **실패도 남긴다.** 조석 수집에 이미 적용해 둔 규칙과 같다:
+ *   **「못 받았다는 기록에는 왜 못 받았는지가 같이 있어야 한다」**.
+ *
+ * ★**메시지가 아니라 코드만 남긴다.** `meta/safetyone` 은 **공개 읽기**다.
+ *  실패 사유 문자열에는 `접속 불가: ${e.message}` 처럼 **사내 주소가 섞여 들어올 수 있다**.
+ *  코드(enum)만 남기고 글귀는 앱이 만들면 샐 것이 구조적으로 없다 —
+ *  덤으로 「사내 화면 이름은 화면 글귀에 쓰지 않는다」도 저절로 지켜진다.
+ */
+export type SyncFailCode = 'login' | 'connect' | 'parse' | 'other';
+
+/** 실패 코드 → 화면에 쓸 말. 모르는 코드가 와도 화면이 비지 않게 기본값을 준다. */
+export function syncFailLabel(code?: string | null): string {
+  switch (code) {
+    case 'login':   return '로그인 안 됨';
+    case 'connect': return '접속 안 됨';
+    case 'parse':   return '화면이 바뀜';
+    default:        return '원인 미상';
+  }
+}
+
+/**
+ * 지금 수집이 **깨져 있나.** 마지막 실패가 마지막 성공보다 **새로우면** 그게 현재 상태다.
+ * (성공이 더 새로우면 그 실패는 이미 지나간 일이다 — 되살아난 것을 빨갛게 두면 안 된다.)
+ */
+export function syncIsBroken(lastSuccess: number | null | undefined,
+                             lastFailure: number | null | undefined): boolean {
+  if (lastFailure == null) return false;
+  return lastSuccess == null || lastFailure > lastSuccess;
+}

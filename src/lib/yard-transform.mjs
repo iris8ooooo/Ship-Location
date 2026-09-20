@@ -46,6 +46,44 @@ export function tmToYard(tmx, tmy) {
  * @param live Map(hull → {x, y})
  * @returns {n, median} — 짝지은 수와 잔차 중앙값(px). 짝이 없으면 n:0.
  */
+/**
+ * ★★**변환식 검증은 「안 움직인 배」로만 재야 한다** (2026-09-20, 수집이 나흘 반 죽은 뒤 발견).
+ *
+ * `residualMedian` 은 수집 좌표와 **지금 지도에 저장된 좌표**를 비교한다. 그런데 저장 좌표는
+ * 배가 실제로 움직이면 낡는다 — 수집이 멈춘 동안 배는 계속 움직이기 때문이다.
+ * 그래서 **수집이 오래 멈출수록 잔차가 커지고, 커진 잔차가 다시 수집을 막는다.**
+ * 실측 2026-09-20: 로그인이 막혀 나흘 반 멈춘 뒤 중앙값이 **23.4px** 로 올라 허용치 20 을
+ * 넘겼다. 변환식은 멀쩡했다 — **9/16 에 같은 계수로 통과했고 계수는 저절로 변하지 않는다.**
+ * 사장님 스샷으로도 확인했다: 8246·8301·8322 는 **수집이 맞고 지도가 낡은 것**이었다.
+ * ★즉 **오래 멈출수록 스스로 못 일어나는 구조**였다. 가드가 복구를 막고 있었다.
+ *
+ * 고친 방식: **선석이 그대로인 배** = 안 움직인 배. 그 배들의 잔차만 본다.
+ *  - 진짜 위험(좌표가 통째로 20~34px 밀림)은 그대로 잡힌다 — 그 정도로는 선석이 안 바뀌므로
+ *    밀린 배들이 전부 표본에 남고 중앙값이 그만큼 올라간다(테스트가 이걸 지킨다).
+ *  - 크게 깨지면 대부분이 선석을 벗어나 표본이 8척 밑으로 떨어져 `n` 검사에 걸린다.
+ *  - 배가 아무리 많이 움직여도 그 배들은 표본에서 빠지므로 **복구를 막지 않는다.**
+ *
+ * ★`residualMedian`(전체)도 남긴다 — 로그에 둘 다 찍어야 「얼마나 낡았나」와
+ *  「변환식이 맞나」를 사람이 갈라 볼 수 있다. 한 숫자로 두 질문에 답하지 않는다.
+ */
+export function residualSettled(rows, live) {
+  const ds = [];
+  for (const r of rows) {
+    const cur = live.get(r.hull);
+    const p = tmToYard(r.tmx, r.tmy);
+    if (!cur || !p || !Number.isFinite(cur.x) || !Number.isFinite(cur.y)) continue;
+    // 선석이 달라졌으면 그 배는 **움직인 것**이다 — 변환식 얘기를 할 자격이 없다.
+    if (berthOfPos(p) !== berthOfPos(cur)) continue;
+    ds.push(Math.hypot(p.x - cur.x, p.y - cur.y));
+  }
+  if (!ds.length) return { n: 0, median: NaN };
+  ds.sort((a, b) => a - b);
+  const m = ds.length % 2
+    ? ds[(ds.length - 1) / 2]
+    : (ds[ds.length / 2 - 1] + ds[ds.length / 2]) / 2;
+  return { n: ds.length, median: m };
+}
+
 export function residualMedian(rows, live) {
   const ds = [];
   for (const r of rows) {
