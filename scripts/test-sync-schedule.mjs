@@ -134,5 +134,41 @@ console.log('\n[7] ★실패 기록에 **사유 문자열을 싣지 않는다** 
      'merge 로 쓴다 — lastSuccess 를 지우지 않는다');
 }
 
+console.log('\n[8] ★기다림을 끝내는 숫자 == 실패를 판정하는 숫자 (2026-09-21 run 126)');
+{
+  // run 126 은 `/gis/ships` 가 오기 전에 포기했다. 화면에 호선+선석을 가진 요소가 **딱 하나**
+  // 있었는데, 기다림을 끝내는 조건이 「행이 하나라도」였기 때문이다. 실패 판정은 「5척 이상」.
+  // 두 숫자가 어긋나면 기다림이 **반드시 실패할 상태에서 끝난다** — 그게 이 검사가 막는 것이다.
+  const src = readFileSync('scripts/scrape-safetyone.mjs', 'utf8');
+
+  const decl = src.match(/^const MIN_ROWS = (\d+);/m);
+  ok(!!decl, `문턱이 상수 한 곳에 있다 (MIN_ROWS = ${decl?.[1]})`);
+
+  // ① 기다림을 끝내는 조건이 그 상수를 쓴다. 「하나라도 있으면 참」이면 안 된다.
+  const wait = src.match(/async function enoughRows\(\)[\s\S]*?\n}/);
+  ok(!!wait, '기다림 판정 함수(enoughRows)가 있다');
+  if (wait) {
+    ok(/>=\s*MIN_ROWS/.test(wait[0]), '기다림을 MIN_ROWS 로 끝낸다');
+    ok(!/\)\.length\)\s*return true/.test(wait[0]),
+       '「행이 하나라도 있으면 참」으로 끝내지 않는다');
+  }
+
+  // ② 야드 행 수로 갈리는 자리가 **전부** 그 상수를 쓴다. 하나라도 숫자를 박으면 다시 갈라진다.
+  //    ★상수 선언 뒤쪽만 본다 — 그 앞의 `rows.length < 3` 은 응답이 **API 후보인가**를
+  //     보는 다른 숫자라 같이 묶으면 안 된다(다른 질문에 같은 문턱을 강요하게 된다).
+  const tail = src.slice(src.indexOf('const MIN_ROWS'));
+  const bare = [...tail.matchAll(/rows\.length\s*<\s*(\w+)/g)].map(m => m[1]);
+  ok(bare.length >= 2, `야드 행 수로 갈리는 자리 ${bare.length}곳을 찾았다`);
+  // ★비어 있으면 every() 가 **공짜로 통과**한다. 못 찾은 것을 「전부 맞다」로 읽지 않는다.
+  ok(bare.length >= 2 && bare.every(v => v === 'MIN_ROWS'), `전부 MIN_ROWS 다 (${bare.join(', ')})`);
+
+  // ③ 못 읽었다는 기록에 **얼마나 기다렸는지**가 같이 있어야 한다. run 126 의 로그에는
+  //    「1개밖에 못 읽었다」만 있어서, 25초 중 5초만 쓰고 포기한 사실이 어디에도 없었다.
+  const bailCall = src.match(/await bail\(`행을[\s\S]{0,300}?'parse'\)/);
+  ok(!!bailCall && /waited/.test(bailCall[0]), '실패 사유에 기다린 시간이 들어간다');
+  // ★단 그 사유는 **로그·아티팩트까지만** 간다. 앱으로 나가는 건 여전히 code 뿐이다([7]).
+  ok(/'parse'\)/.test(bailCall?.[0] ?? ''), '앱에는 여전히 코드만 넘긴다 (parse)');
+}
+
 console.log(`\n${fail ? '❌' : '✅'} 통과 ${pass} · 실패 ${fail}`);
 process.exit(fail ? 1 : 0);

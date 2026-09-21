@@ -426,11 +426,42 @@ async function rowsFrom(frame) {
 //  제목을 누르면 오히려 패널이 접힌다 — 그래서 제목은 빼고 실제 버튼만 누른다.
 const CLICKABLE = 'button, a, [role="tab"], [role="button"], input[type="button"], input[type="submit"]';
 
-/** 어느 프레임에서든 행이 하나라도 읽히면 참. 결과가 떴는지의 유일한 신뢰 신호다. */
-async function anyRows() {
-  if (shipsLayer) return true;                               // 지도 배 레이어가 왔다
+/**
+ * ★★기다림을 끝내는 조건과 **실패를 판정하는 조건은 같은 숫자여야 한다** (2026-09-21 run 126).
+ *
+ *  예전 `anyRows()` 는 **행이 하나라도** 있으면 "다 떴다" 로 보고 기다림을 끝냈다. 그런데
+ *  아래 성공 판정은 `5척 이상`이다. 두 숫자가 어긋나 있으면 **기다림이 「반드시 실패할
+ *  상태」에서 끝날 수 있다** — 실제로 그렇게 죽었다:
+ *
+ *    00:58:45 로그인 성공 → 00:58:55 포기 (10초)   ※기다리기로 한 시간은 25초였다
+ *    화면에 호선+선석을 함께 가진 요소가 **딱 하나** 있었다(DIV. both=1). 그걸 보고
+ *    "행이 보인다" 며 기다림을 끝냈고, 정작 정본인 `/gis/ships` 는 **아직 안 와 있었다.**
+ *
+ *  ★`/gis/ships` 는 **맨 마지막에 온다.** 바로 전 성공(run 125)의 네트워크 기록에서도
+ *   지도 타일 25장·점검이력 4번·부서 4번이 다 지나간 **뒤에** 도착했다. 그날 아침 응답은
+ *   저녁보다 2.5배 컸다(점검이력 2.27MB vs 0.92MB) — 즉 **아침 회차가 제일 느리다.**
+ *   일찍 포기하면 제일 느린 회차부터 떨어져 나간다.
+ *
+ *  → 숫자를 하나로 합친다. 기다림도 `MIN_ROWS`, 실패 판정도 `MIN_ROWS`.
+ *    이 레포가 이미 적어 둔 것과 같은 교훈이다: **가드는 「지켜야 하는 그것」을 재야 한다.**
+ */
+const MIN_ROWS = 5;                 // 야드엔 보통 20척 이상 있다. 이보다 적으면 못 읽은 것이다.
+/**
+ * 얼마나 기다리나. ★이건 **가드가 아니라 인내심**이다 — 맞고 틀림을 가르는 것은 `MIN_ROWS`
+ *  뿐이고, 이 값은 「언제 포기하나」만 정한다. 그래서 길게 잡아도 틀린 값이 통과할 수 없고,
+ *  성공하면 그 즉시 빠져나오므로 평소엔 비용이 0이다.
+ *  ★얼마가 충분한지는 **아직 안 재봤다**(run 126 은 10초 시점에 아직 안 온 것만 안다).
+ *   그래서 실제로 얼마나 기다렸는지를 **매번 로그에 찍는다** — 몇 회차 쌓이면 재서 정할 수 있다.
+ */
+const LIST_WAIT_MS = 40000;
+
+/** 배 레이어가 왔거나, 프레임 전체에서 서로 다른 호선이 `MIN_ROWS` 척 이상 읽히면 참. */
+async function enoughRows() {
+  if (shipsLayer) return true;                               // 지도 배 레이어가 왔다 = 정본이 왔다
+  const seen = new Set();                                    // 아래 실제 추출과 같게 호선으로 센다
   for (const f of page.frames()) {
-    try { if ((await rowsFrom(f)).length) return true; } catch { /* 접근 못 하는 프레임 */ }
+    try { for (const r of await rowsFrom(f)) seen.add(r.hull); } catch { /* 접근 못 하는 프레임 */ }
+    if (seen.size >= MIN_ROWS) return true;
   }
   return false;
 }
@@ -460,14 +491,34 @@ async function clickNamed(re, step) {
 await page.waitForLoadState('networkidle').catch(() => {});
 
 // 이미 3중점검 화면이면(router-link-exact-active) 누를 필요가 없지만, 아니면 눌러 들어간다.
-for (const [step, re] of [['3중점검', /3중점검|삼중점검/], ['조회', /조회|검색/], ['리스트', /리스트|목록/]]) {
-  if (await anyRows()) { trace.push({ step, 건너뜀: '이미 행이 보임' }); break; }
-  await clickNamed(re, step);
-  await page.waitForTimeout(1500);
-}
+const STEPS = [['3중점검', /3중점검|삼중점검/], ['조회', /조회|검색/], ['리스트', /리스트|목록/]];
 
-// 조회 응답이 늦을 수 있다. 행이 보일 때까지 최대 25초 기다린다.
-for (let i = 0; i < 50 && !(await anyRows()); i++) await page.waitForTimeout(500);
+/**
+ * ★두 바퀴 돈다 — 첫 바퀴는 **화면이 그려지기 전에** 눌릴 수 있다 (2026-09-21 run 126).
+ *  그날 기록: `조회` 후보 **0**(보이는 버튼이 하나도 없었다). 그런데 10초 뒤 남긴 화면
+ *  뼈대에는 `BUTTON.v-btn…bg-white 「조회」` 가 **멀쩡히 있었다.** 즉 버튼이 없던 게 아니라
+ *  우리가 일찍 본 것이다.
+ *  ★원인은 `waitForLoadState('networkidle')` 이다. 이 사이트는 Vue SPA 라 뼈대를 받은 뒤
+ *   **잠깐 조용해졌다가** 그때부터 제 XHR 을 쏘기 시작한다. networkidle 은 그 잠깐의
+ *   고요를 "다 됐다" 로 읽는다. 기다린 뒤 한 번 더 누르면 그 경우가 덮인다.
+ *  ★성공 경로는 한 바퀴에 끝난다(둘째 바퀴 조건이 `!enoughRows()`). 두 바퀴를 다 도는 건
+ *   어차피 실패로 갈 회차뿐이고, 잡 제한 10분 안에 넉넉히 들어온다.
+ */
+let waitedMs = 0;
+for (let round = 1; round <= 2 && !(await enoughRows()); round++) {
+  for (const [step, re] of STEPS) {
+    if (await enoughRows()) { trace.push({ step, 건너뜀: `이미 ${MIN_ROWS}척 이상 보임` }); break; }
+    await clickNamed(re, round === 1 ? step : `${step}(2바퀴)`);
+    await page.waitForTimeout(1500);
+  }
+  // 조회 응답이 늦을 수 있다. **행이 충분해질 때까지** 기다린다 — 하나 보이는 걸로 끝내지 않는다.
+  const t0 = Date.now();
+  while (Date.now() - t0 < LIST_WAIT_MS && !(await enoughRows())) await page.waitForTimeout(500);
+  waitedMs += Date.now() - t0;
+}
+const waitedS = (waitedMs / 1000).toFixed(1);
+// ★얼마나 기다렸는지를 성공해도 찍는다. `LIST_WAIT_MS` 를 재서 정하려면 이 값이 쌓여야 한다.
+console.log(`리스트 기다림 ${waitedS}s (한도 ${LIST_WAIT_MS / 1000}s x 2바퀴) — 배 레이어 ${shipsLayer ? '옴' : '안 옴'}`);
 
 // ① 지도 배 레이어에서만 읽는다. 다른 응답은 배 위치표가 아니다.
 let rows = [];
@@ -487,7 +538,7 @@ if (shipsLayer) {
 }
 
 // ② API 로 못 읽었으면 DOM 을 훑는다(예전 경로 — 표 화면을 열어 둔 경우).
-if (rows.length < 5) {
+if (rows.length < MIN_ROWS) {
   kind = 'loc';
   rows = [];
   const seenHull = new Set();
@@ -499,7 +550,13 @@ if (rows.length < 5) {
 }
 
 // 야드엔 보통 20척 이상 있다. 몇 척 안 잡혔으면 리스트가 안 펼쳐진 것이다.
-if (rows.length < 5) await bail(`행을 ${rows.length}개밖에 못 읽었다 — 리스트가 안 펼쳐졌거나 화면 구조가 바뀌었다`, 'parse');
+// ★사유에 **얼마나 기다렸는지**를 같이 적는다. run 126 은 「1개밖에 못 읽었다」만 남겨서,
+//  기다리기로 한 25초 중 5초만 쓰고 포기했다는 사실이 로그 어디에도 없었다.
+//  못 찾았다는 기록에는 **왜 못 찾았는지**가 같이 있어야 한다(조석 수집에서 배운 것).
+if (rows.length < MIN_ROWS)
+  await bail(`행을 ${rows.length}개밖에 못 읽었다(${MIN_ROWS}척 이상이어야 한다)`
+    + ` — ${waitedS}s 기다렸고 배 레이어는 ${shipsLayer ? '왔다' : '안 왔다'}.`
+    + ' 리스트가 안 펼쳐졌거나 화면 구조가 바뀌었다', 'parse');
 
 // ③ 지도 캔버스에서 **뱃머리**를 읽는다.
 //  배 레이어의 angle 은 0/±90 두 값뿐이라 축밖에 말하지 않지만, 그림은 선수를
