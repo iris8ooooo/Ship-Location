@@ -15,7 +15,8 @@ import { join } from 'node:path';
 
 // ── vessel-plan.ts 를 그대로 돌린다 (픽스처용 사본을 만들지 않는다) ──────────
 const out = join(mkdtempSync(join(tmpdir(), 'vp-')), 'vessel-plan.mjs');
-execFileSync('npx', ['esbuild', 'src/lib/vessel-plan.ts', '--format=esm', '--target=es2022', `--outfile=${out}`],
+// ★`--bundle` — vessel-plan 이 호선 종류 판정(`specIsDF`)을 vessel-roster 에서 가져온다(사본을 만들지 않으려고).
+execFileSync('npx', ['esbuild', 'src/lib/vessel-plan.ts', '--bundle', '--format=esm', '--target=es2022', `--outfile=${out}`],
   { stdio: 'pipe' });
 const { fetchVesselPlan } = await import(out);
 
@@ -25,9 +26,25 @@ const TODAY = iso(new Date());
 const day = n => { const [y, m, d] = TODAY.split('-').map(Number); return iso(new Date(y, m - 1, d + n)); };
 
 // ── 픽스처 ────────────────────────────────────────────────────────────────
+// ★준비 룰은 호선 종류별이다(`vessel_kind`). **같은 번호(25)** 에 두 종류의 룰을 일부러 겹쳐 둔다 —
+//  종류를 안 가르면 한 호선에 둘 다 붙고, 그게 바로 「그럴듯한 오답」이다.
 const RULE = {
-  id: 'rule-passinghole', activity_order: 25, title: '본딩샵 패싱홀 불출',
+  id: 'rule-passinghole', vessel_kind: 'LNGC', activity_order: 25, title: '본딩샵 패싱홀 불출',
   lead_days: 7, active: true, per_tank: true, tanks: null,
+};
+const RULE_DF = {
+  id: 'rule-df', vessel_kind: 'DF', activity_order: 25, title: 'DF 전용 준비',
+  lead_days: 7, active: true, per_tank: true, tanks: null,
+};
+
+/** 호선 명부(`vessels`) — 호선 종류는 여기서 읽는다. 없는 호선(G·H)은 일부러 뺐다. */
+const VESSELS = {
+  A: { vessel_name: null, containment: null },
+  B: { vessel_name: null, containment: 'Mark III Flex' },
+  C: { vessel_name: 'DF 컨테이너선', containment: 'DF (Dual Fuel)' },
+  D: { vessel_name: null, containment: null },
+  E: { vessel_name: null, containment: null },
+  F: { vessel_name: null, containment: null },
 };
 
 /** 호선별 공정 행. `order` 를 문자열로 줄지 숫자로 줄지도 시험 대상이다. */
@@ -40,21 +57,22 @@ const SCHED = {
     { tank_no: 1, activity_order: 1.5, activity_name: '창 밖 세부 검사', planned_start_date: day(9), duration_days: 1, applicable: true, actual_start_date: null, status: 'pending', sub_key: 'final' },
     { tank_no: 1, activity_order: 25, activity_name: '패싱홀 클로징', planned_start_date: day(12), duration_days: 1, applicable: true, actual_start_date: null, status: 'pending', sub_key: null },
   ],
-  // ② 표준 호선(부모 max 36)인데 36번에 세부가 붙어 36.5 가 생긴다 → DF 오인 함정
+  // ② 표준 호선 — **지금의 실제 모양**: 부모 max 37(2026-09-07 PTBS 분리 뒤) + 세부 37.5.
+  //    옛 코드는 `> 36` 이면 DF 로 봐서 이 호선의 준비를 통째로 지웠다(두 달간 전 호선).
   B: [
-    { tank_no: 1, activity_order: 36, activity_name: '마지막 공정', planned_start_date: day(12), duration_days: 1, applicable: true, actual_start_date: null, status: 'pending', sub_key: null },
-    { tank_no: 1, activity_order: 36.5, activity_name: '막판 검사', planned_start_date: day(3), duration_days: 1, applicable: true, actual_start_date: null, status: 'pending', sub_key: 'final' },
+    { tank_no: 1, activity_order: 37, activity_name: '마지막 공정', planned_start_date: day(12), duration_days: 1, applicable: true, actual_start_date: null, status: 'pending', sub_key: null },
+    { tank_no: 1, activity_order: 37.5, activity_name: '막판 검사', planned_start_date: day(3), duration_days: 1, applicable: true, actual_start_date: null, status: 'pending', sub_key: 'final' },
     { tank_no: 1, activity_order: 25, activity_name: '패싱홀 클로징', planned_start_date: day(12), duration_days: 1, applicable: true, actual_start_date: null, status: 'pending', sub_key: null },
   ],
-  // ③ 진짜 DF 호선 — 부모 행 자체가 36 을 넘는다
+  // ③ 진짜 DF 호선 — 명부의 containment 가 DF. 공정은 52개(2026-11-11 기준)
   C: [
-    { tank_no: 1, activity_order: 47, activity_name: 'DF 전용 공정', planned_start_date: day(12), duration_days: 1, applicable: true, actual_start_date: null, status: 'pending', sub_key: null },
+    { tank_no: 1, activity_order: 52, activity_name: 'DF 전용 공정', planned_start_date: day(12), duration_days: 1, applicable: true, actual_start_date: null, status: 'pending', sub_key: null },
     { tank_no: 1, activity_order: 25, activity_name: '패싱홀 클로징', planned_start_date: day(12), duration_days: 1, applicable: true, actual_start_date: null, status: 'pending', sub_key: null },
   ],
   // ④ ②와 같은데 activity_order 가 **문자열**로 온다 (numeric 직렬화 대비)
   D: [
-    { tank_no: 1, activity_order: '36', activity_name: '마지막 공정', planned_start_date: day(12), duration_days: 1, applicable: true, actual_start_date: null, status: 'pending', sub_key: null },
-    { tank_no: 1, activity_order: '36.5', activity_name: '막판 검사', planned_start_date: day(3), duration_days: 1, applicable: true, actual_start_date: null, status: 'pending', sub_key: 'final' },
+    { tank_no: 1, activity_order: '37', activity_name: '마지막 공정', planned_start_date: day(12), duration_days: 1, applicable: true, actual_start_date: null, status: 'pending', sub_key: null },
+    { tank_no: 1, activity_order: '37.5', activity_name: '막판 검사', planned_start_date: day(3), duration_days: 1, applicable: true, actual_start_date: null, status: 'pending', sub_key: 'final' },
     { tank_no: 1, activity_order: '25', activity_name: '패싱홀 클로징', planned_start_date: day(12), duration_days: 1, applicable: true, actual_start_date: null, status: 'pending', sub_key: null },
   ],
   // ⑥ 부모는 창 밖(D+12)이고 세부만 창 안(D+3) — 실제로 이 꼴이 흔하다.
@@ -63,6 +81,11 @@ const SCHED = {
     { tank_no: 1, activity_order: 36, activity_name: '마지막 공정', planned_start_date: day(12), duration_days: 1, applicable: true, actual_start_date: null, status: 'pending', sub_key: null },
     { tank_no: 1, activity_order: 36.5, activity_name: '막판 검사', planned_start_date: day(3), duration_days: 1, applicable: true, actual_start_date: null, status: 'pending', sub_key: 'final' },
   ],
+  // ⑦ 공정은 있는데 명부(`vessels`)에 호선이 없다 → 종류를 알 수 없다. 짐작하면 안 된다.
+  G: [
+    { tank_no: 1, activity_order: 25, activity_name: '패싱홀 클로징', planned_start_date: day(12), duration_days: 1, applicable: true, actual_start_date: null, status: 'pending', sub_key: null },
+  ],
+  // (H 는 공정도 명부도 없다 = 우리 호선이 아닌 배. SCHED 에 없으므로 빈 배열이 돌아온다.)
   // ⑤ 세부 행이 준비 계산에 끼어들지 않는가 — 25번 세부(25.5)가 더 이른 날짜를 갖는다.
   //    끼어들면 준비 마감일이 그쪽으로 당겨져 틀린 날이 나온다.
   E: [
@@ -87,7 +110,8 @@ globalThis.fetch = async (url) => {
     usedTable = table;
     return json(SCHED[hull] ?? []);
   }
-  if (table === 'prep_rules') return json([RULE]);
+  if (table === 'prep_rules') return json([RULE, RULE_DF]);
+  if (table === 'vessels') return json(VESSELS[hull] ? [VESSELS[hull]] : []);
   if (table === 'prep_checks') return json([]);
   if (table === 'work_tasks') {
     return json([{ title: LEAK, category: '분류', due_date: day(1), status: 'todo', vessel_no: hull || 'A' }]);
@@ -131,13 +155,22 @@ const f = F.upcoming[0];
 ok(f?.label === '1탱크 [36 세부] 막판 검사',
   `36.5 → [36 세부] (실제: ${f?.label})`);
 
-console.log('\n[2] 세부 행 때문에 표준 호선이 DF 로 오인되지 않는가');
+console.log('\n[2] ★호선 종류를 공정 개수로 짐작하지 않는가 (2026-11-11 — 두 달간 전 호선 준비 0건)');
 const B = await fetchVesselPlan('B');
 ok(prep(B).length > 0,
-  `부모 max 36 + 세부 36.5 → 준비가 살아 있다 (실제 ${prep(B).length}건)`);
+  `표준선(부모 max 37 + 세부 37.5) → 준비가 살아 있다 (실제 ${prep(B).length}건)`);
+ok(prep(B).every(t => !t.label.includes(RULE_DF.title)),
+  `표준선에 DF 룰이 붙지 않는다 (실제: ${prep(B).map(t => t.label).join(' / ')})`);
 const C = await fetchVesselPlan('C');
-ok(prep(C).length === 0,
-  `진짜 DF(부모 47) → 준비를 빼는 것은 그대로 (실제 ${prep(C).length}건)`);
+ok(prep(C).length === 1 && prep(C)[0].label.includes(RULE_DF.title),
+  `DF 호선 → DF 룰의 준비만 뜬다 (실제: ${prep(C).map(t => t.label).join(' / ') || '없음'})`);
+ok(requested.has('vessels'), '호선 종류를 명부(vessels)에서 읽는다');
+const G = await fetchVesselPlan('G');
+ok(G.tasksFailed === true && prep(G).length === 0,
+  `공정은 있는데 명부에 없는 호선 → 짐작하지 않고 「못 읽음」 (tasksFailed=${G.tasksFailed}, 준비 ${prep(G).length}건)`);
+const H = await fetchVesselPlan('H');
+ok(H.tasksFailed === false && prep(H).length === 0,
+  `공정도 명부도 없는 배(우리 호선 아님) → 실패가 아니라 그냥 없음 (tasksFailed=${H.tasksFailed})`);
 
 console.log('\n[3] activity_order 가 문자열로 와도 준비가 살아 있는가');
 const D = await fetchVesselPlan('D');

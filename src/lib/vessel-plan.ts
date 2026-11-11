@@ -53,14 +53,18 @@
  *      (prep_rules 는 integer)가 **전부 false** 가 되어 준비가 통째로 사라진다. 에러가 아니라
  *      빈 목록이라 아무도 모른다. 이 개발환경은 프록시가 supabase.co 를 막아 실서버로 확인할
  *      방법이 없으므로 **읽는 자리에서 `Number()` 로 못박는다** — 어느 쪽이든 안전하다.
- *   ② DF 판정(`max activity_order > 36`)에 세부 행이 섞이면, 표준 호선의 36번 공정에 세부
- *      검사가 붙는 순간 36.5 > 36 이 되어 **DF 로 오인**되고 준비가 통째로 사라진다.
- *      지금은 세부가 19.5·1.5 뿐이라 안 걸리지만(실측) 시간문제였다. **부모 행만 보고 판정한다.**
+ *   ② (그때의) DF 판정 `max activity_order > 36` 에 세부 행이 섞이면 36.5 > 36 이 되어 표준 호선이
+ *      DF 로 오인됐다. ★그 판정은 2026-11-11 에 통째로 버렸다 — 표준선이 37공정이 되면서 **상수 자체가
+ *      틀려** 두 달간 전 호선의 준비가 사라져 있었다. 지금은 명부에서 종류를 읽는다(아래 `VesselKind`).
+ *      준비 계산이 **부모 행만** 보는 것은 그대로다(룰은 부모 공정 번호에 걸린다).
  *
  * anon 키는 공개용이다(브라우저 번들에 실리는 publishable key, RLS 가 접근을 정한다).
  * 세 테이블 모두 anon SELECT 정책이 열려 있음을 확인했다(2026-08-30).
+ * `vessels`·`prep_rules.vessel_kind` 도 anon 으로 읽힌다(2026-11-11 `set local role anon` 으로 확인: 27척 · 룰 24건).
  * 뷰도 anon SELECT 가 열려 있고 `security_invoker=true` 라 밑 테이블의 RLS 를 그대로 탄다(2026-09-02 확인).
  */
+
+import { specIsDF } from './vessel-roster';
 
 const SUPA_URL = 'https://ltjdaviuglvswkgxmkvl.supabase.co/rest/v1';
 const SUPA_KEY = 'sb_publishable_d471VDiUvHlMVgvt1bQF6A_rx3lTLKW';
@@ -73,12 +77,19 @@ const HEADERS = { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` };
 const HORIZON_DAYS = 5;
 
 /**
- * 공정관리비서 표준 룰북의 공정 개수. 이보다 큰 activity_order 를 가진 호선은 DF형이라
- * 준비 룰(표준 룰북 기준)을 통째로 적용하지 않는다 — LNG 앱과 같은 규칙이다.
- * ★LNG 앱 `src/lib/rulebook.ts` 의 RULEBOOK 길이와 **같아야 한다.**
- *  실측(2026-08-30): 표준 호선은 max activity_order 가 정확히 36, DF 호선(8292·8300)은 47.
+ * ★호선 종류(LNGC / DF)는 **공정 개수로 판정하지 않는다** (2026-11-11).
+ *  예전에는 `RULEBOOK_LEN = 36` 을 박아 두고 "이보다 큰 activity_order 가 있으면 DF" 로 봤다.
+ *  그런데 공정관리비서가 2026-09-07 에 PTBS 를 두 공정으로 갈라 **표준선이 37공정**이 됐고,
+ *  이 상수는 그대로 남았다 → 37 > 36 이라 **표준선 전부가 DF 로 오인**돼 호선 카드의 「준비」가
+ *  **두 달 동안 전 호선에서 통째로 빠져 있었다.** 에러가 아니라 빈 목록이라 아무도 몰랐다.
+ *  (DF 도 그 사이 47 → 48 → 51 → 52 로 네 번 바뀌었다. 숫자를 박으면 개편마다 썩는다.)
+ *  → 종류는 `vessels.containment`·`vessel_name` 에서 읽는다. 지도에서 DF 를 초록으로 칠하는
+ *    판정(`specIsDF`)과 **같은 함수**다 — 같은 배가 지도와 카드에서 다른 종류가 될 수 없다.
+ * ★준비 룰은 **호선 종류별**이다(`prep_rules.vessel_kind`, 공정관리비서 2026-09-06).
+ *  같은 activity_order 가 종류마다 다른 공정을 가리키므로 **그 호선 종류의 룰만** 본다 —
+ *  공정관리비서 할일탭(`todo-feed.ts`)과 같은 규칙이다. DF 호선도 이제 DF 룰의 준비가 뜬다.
  */
-const RULEBOOK_LEN = 36;
+type VesselKind = 'LNGC' | 'DF';
 
 export interface PlanItem {
   label: string;
@@ -167,12 +178,13 @@ export async function fetchVesselPlan(hull: string): Promise<VesselPlan | null> 
     const soft = (url: string) => fetch(url, { headers: HEADERS }).catch(() => null);
     // ★`work_tasks` 요청은 **여기 없다.** 걸러서 감추는 것이 아니라 아예 안 가져온다 —
     //  조건으로 막는 방식은 조건이 하나 어긋나면 그대로 새고, 실제로 그렇게 샜다(머리 주석).
-    const [rSched, rRules, rChecks] = await Promise.all([
+    const [rSched, rRules, rChecks, rVessel] = await Promise.all([
       fetch(byVessel('vessel_schedule_rows', hull,
         'tank_no,activity_order,activity_name,planned_start_date,duration_days,applicable,actual_start_date,status,sub_key'),
         { headers: HEADERS }),
-      soft(`${SUPA_URL}/prep_rules?` + new URLSearchParams({ select: 'id,activity_order,title,lead_days,active,per_tank,tanks' })),
+      soft(`${SUPA_URL}/prep_rules?` + new URLSearchParams({ select: 'id,vessel_kind,activity_order,title,lead_days,active,per_tank,tanks' })),
       soft(byVessel('prep_checks', hull, 'rule_id,tank_no')),
+      soft(byVessel('vessels', hull, 'vessel_name,containment')),
     ]);
     if (!rSched.ok) return null;
     const schedRows: any[] = await rSched.json();
@@ -213,15 +225,20 @@ export async function fetchVesselPlan(hull: string): Promise<VesselPlan | null> 
     // 하나라도 못 읽으면 "할일 불러오기 실패" 를 적는다. 조용히 비워 두면 "할일이 없는 것" 과
     // "못 읽은 것" 을 구분할 수 없다 — 이 프로젝트가 반복해서 당한 조용한 오답이다.
     const tasks: TaskItem[] = [];
-    let tasksFailed = !(rRules?.ok && rChecks?.ok);
+    let tasksFailed = !(rRules?.ok && rChecks?.ok && rVessel?.ok);
 
-    if (!tasksFailed) {
+    // 공정 행이 하나도 없으면(우리 호선이 아닌 배) 준비를 계산할 것이 없다 — 실패가 아니다.
+    const hasSched = schedRows.some(r => r.sub_key == null);
+    if (!tasksFailed && hasSched) {
       // 준비 — 공정 계획일에서 lead_days 를 뺀 날이 트리거다.
-      // 룰은 표준 룰북 기준이라 DF형 호선(activity_order > RULEBOOK_LEN)은 통째로 제외한다.
-      // ★부모 행만 본다. 세부 행(부모+0.5)을 섞으면 36번 공정에 세부가 붙는 순간
-      //  36.5 > 36 이라 표준 호선이 DF 로 오인되고 준비가 통째로 사라진다.
-      const isDF = schedRows.some(r => r.sub_key == null && Number(r.activity_order ?? 0) > RULEBOOK_LEN);
-      if (!isDF) {
+      // ★호선 종류는 명부(`vessels`)에서 읽는다. 공정 개수로 짐작하지 않는다(위 주석).
+      //  공정은 있는데 명부에 호선이 없으면 종류를 알 수 없다 → **짐작하지 않고 실패로 적는다.**
+      //  틀린 종류의 룰을 대면 엉뚱한 공정의 준비가 그럴듯하게 뜬다 — 빈 목록보다 나쁜 오답이다.
+      const vesselRow = ((await rVessel!.json()) as any[])[0];
+      if (!vesselRow) tasksFailed = true;
+      else {
+        const kind: VesselKind =
+          specIsDF(vesselRow.containment) || specIsDF(vesselRow.vessel_name) ? 'DF' : 'LNGC';
         const done = new Set(((await rChecks!.json()) as any[]).map(c => `${c.rule_id}|${c.tank_no ?? 0}`));
         // (공정순번|탱크) → 가장 이른 **미실행** 계획일
         const byTank = new Map<string, { order: number; tank: number; planned: string }>();
@@ -242,6 +259,8 @@ export async function fetchVesselPlan(hull: string): Promise<VesselPlan | null> 
         }
         for (const rule of (await rRules!.json()) as any[]) {
           if (rule.active === false) continue;
+          // ★그 호선 종류의 룰만 — 같은 번호가 종류마다 다른 공정이다.
+          if ((rule.vessel_kind === 'DF' ? 'DF' : 'LNGC') !== kind) continue;
           const tankFilter = Array.isArray(rule.tanks) && rule.tanks.length > 0 ? rule.tanks as number[] : null;
           const rows = [...byTank.values()].filter(v =>
             v.order === Number(rule.activity_order) && (!tankFilter || tankFilter.includes(v.tank)));
