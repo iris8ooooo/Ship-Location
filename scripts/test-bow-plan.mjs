@@ -1,9 +1,9 @@
 /**
  * 그림에서 읽은 뱃머리가 **실제 배치 계획까지** 흘러가는지 본다.
- * 앞 단계(bow-detect)는 test-bow-detect.mjs 가 본다. 여기는 그 뒤 — planMoves 다.
+ * 앞 단계(bow-detect)는 test-bow-detect.mjs 가 본다. 여기는 그 뒤 — 실좌표 계획(planByCoords)이다.
  *   node scripts/test-bow-plan.mjs
  */
-import { planMoves, shipHeading } from '../src/lib/safetyone-match.mjs';
+import { planByCoords, shipHeading } from '../src/lib/safetyone-match.mjs';
 import { headingFromBow } from '../src/lib/bow-detect.mjs';
 import { axisFromAngle } from '../src/lib/yard-transform.mjs';
 
@@ -43,7 +43,7 @@ const rows = Object.keys(BOW).map(h => ({
   hull: h, loc: BERTH[h], at: { x: LIVE[h][0], y: LIVE[h][1] },
   axisR: axisFromAngle(ANG[h]), bowDeg: BOW[h],
 }));
-const plan = planMoves(rows, live);
+const plan = planByCoords(rows, live);
 const turns = plan.moves.filter(m => m.reason === '뱃머리');
 console.log(`   이동 ${plan.moves.length} (뱃머리 ${turns.length}) · 그대로 ${plan.skips.length}`);
 for (const m of turns) console.log(`     ${m.hull}  r ${live.get(m.hull).r} → ${m.to.r}`);
@@ -61,12 +61,12 @@ for (const h of ['8222','8313','8314','8315'])
 console.log('\n[4] 멱등 — 반영한 뒤 다시 돌리면 이동 0');
 const live2 = new Map(live);
 for (const m of plan.moves) live2.set(m.hull, { x: m.to.x, y: m.to.y, r: m.to.r });
-const plan2 = planMoves(rows, live2);
+const plan2 = planByCoords(rows, live2);
 ok(plan2.moves.length === 0, `두 번째 이동 0 (실제 ${plan2.moves.length})`);
 
 console.log('\n[5] 블록은 손대지 않는다');
 const live3 = new Map([['8238', { x: 966, y: 484, r: 180 }]]);   // 관리자가 180 으로 돌려둠
-const plan3 = planMoves([{ hull: '8238', loc: '1BERTH', at: { x: 981, y: 480 },
+const plan3 = planByCoords([{ hull: '8238', loc: '1BERTH', at: { x: 981, y: 480 },
                            axisR: axisFromAngle(270) }], live3);   // bowDeg 없음
 ok(plan3.moves.length === 0, '방향을 못 읽은 배는 사람이 정한 180 을 그대로 둔다');
 

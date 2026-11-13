@@ -13,3 +13,5 @@ export function isSeaLoc(loc: string): boolean;
 export function parseListText(text: string): { rows: SyncRow[]; unknownLines: string[] };
 export function berthOfPos(pos: { x: number; y: number }): string | null;
 export function planMoves(rows: SyncRow[], live: Map<string, unknown>): SyncPlan;
+/** 지도에 그리지 않을 배 — 수집이 한 번은 본 배인데 마지막 명단에 없다. 명단이 없으면 빈 집합. */
+export function absentHulls(ships: Map<string, unknown> | Record<string, unknown>, present: string[] | null | undefined): Set<string>;

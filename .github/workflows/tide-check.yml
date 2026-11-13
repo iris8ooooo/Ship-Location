@@ -35,6 +35,11 @@ on:
       #  남기는지, [8] 은 기다림과 실패 판정이 **같은 문턱**을 쓰는지를 소스에서 직접 읽는다.
       #  여기 없으면 이 파일만 고쳤을 때 그 검사가 **아예 안 돈다** — 안 도는 가드는 가드가 아니다.
       - 'scripts/scrape-safetyone.mjs'
+      # ★게이트도 같이 본다. `test-sync-schedule` [4] 가 이 파일이 일정을 따로 갖지 않고
+      #  앱과 같은 파일(sync-schedule.ts)에 묻는지를 소스에서 직접 읽는다.
+      - 'scripts/sync-gate.mjs'
+      - 'scripts/sync-safetyone.mjs'
+      - 'scripts/fixtures/yard-*.json'
       - 'scripts/sync-tide.mjs'
       - 'scripts/fixtures/khoa-tide-*.json'
       - 'firestore.rules'
@@ -63,7 +68,8 @@ jobs:
           #  막는 검사다(2026-09-06 유출 건). 하나라도 빨간불이면 set -e 로 여기서 멈춘다.
           for t in test-vessel-plan test-sea test-weather test-sync-schedule \
                    test-visits-agg test-visitor-name \
-                   test-berth-label test-bow-detect test-bow-plan test-bow-safety; do
+                   test-berth-label test-bow-detect test-bow-plan test-bow-safety \
+                   test-plan-coords; do
             echo "── $t"
             node "scripts/$t.mjs" | tail -n 2
           done

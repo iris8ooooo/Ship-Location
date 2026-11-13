@@ -49,9 +49,11 @@ ok(berthLabelAt('quay1', null) === '1안벽', `pos 없음 → ${berthLabelAt('qu
 ok(berthLabelAt('quay1', {}) === '1안벽', `x 없음 → ${berthLabelAt('quay1', {})}`);
 ok(berthLabelAt('quay1', { x: 'abc' }) === '1안벽', `x 가 숫자가 아님 → ${berthLabelAt('quay1', { x: 'abc' })}`);
 
-console.log('\n[6] ★선석 id 는 안 쪼갠다 — "선석이 같으면 안 옮긴다" 가 살아 있어야 한다');
+console.log('\n[6] ★선석 id 는 안 쪼갠다 — A·B 는 글자일 뿐 선석은 하나다');
 // A 자리와 B 자리 둘 다 berthOfPos 로는 같은 quay1 이어야 한다.
-// 여기가 깨지면 A↔B 를 넘나들 때마다 배를 옮기게 된다.
+// 변환식 검증(residualSettled)이 「선석이 그대로인 배」를 이 id 로 고르고, 이름만 아는
+// 붙여넣기 경로는 이 id 가 같으면 안 옮긴다. (실좌표 수집은 2026-11-13 부터 id 가 아니라
+// **실제 자리와의 거리**로 옮길지 정한다 — test-plan-coords.mjs)
 ok(berthOfPos({ x: 777, y: 574 }) === 'quay1', '1안벽 A 자리 → quay1');
 ok(berthOfPos({ x: 549, y: 569 }) === 'quay1', '1안벽 B 자리 → quay1');
 ok(berthOfPos({ x: 245, y: 563 }) === 'quay2', '2안벽 A 자리 → quay2');
