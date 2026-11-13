@@ -10,14 +10,15 @@
  *   - 그 외 : 리스트 화면을 복사해 붙인 텍스트 파일 (관대하게 파싱)
  *
  * 반영 규칙은 src/lib/safetyone-match.mjs 에 있다. 요약:
- *   선석이 바뀐 배만 옮기고, 같은 선석이면 손대지 않고, 모르면 추측하지 않는다.
+ *   실좌표를 받았으면(자동수집) 실제 자리에서 벗어난 배를 그 자리로 옮기고, 명단에 없는 배는
+ *   지도에서 내린다(지우지 않는다). 선석 이름만 받았으면 선석이 바뀐 배만 옮긴다.
  * 이동한 배는 history 에 남겨 앱의 '최근 업데이트' 에 뜨게 하고,
  * 성공 시각은 meta/safetyone 에 기록한다(룰 배포 전이면 조용히 건너뛴다).
  */
 import { readFileSync } from 'node:fs';
 import { initializeApp } from 'firebase/app';
-import { getFirestore, connectFirestoreEmulator, collection, getDocs, doc, setDoc, updateDoc, addDoc } from 'firebase/firestore';
-import { parseListText, planMoves, BERTH_LABEL, berthLabelAt } from '../src/lib/safetyone-match.mjs';
+import { getFirestore, connectFirestoreEmulator, collection, getDocs, getDoc, doc, setDoc, updateDoc, addDoc, deleteField } from 'firebase/firestore';
+import { parseListText, planMoves, planByCoords, BERTH_LABEL, berthLabelAt } from '../src/lib/safetyone-match.mjs';
 import { residualMedian, residualSettled, namedRowsFromCoords, MAX_RESIDUAL, tmToYard } from '../src/lib/yard-transform.mjs';
 import { bowByHull, unpackMask, diagnose, bowFromHeading } from '../src/lib/bow-detect.mjs';
 
@@ -144,7 +145,7 @@ if (capture?.kind === 'coords') {
     console.log('뱃머리 — 쓸 만한 지도 캔버스가 없다. 선석 관례로 간다.');
   }
   rows = named.rows;
-  if (named.off.length) console.log(`⚠ 아는 선석 근처가 아니다(손 안 댐): ${named.off.join(' ')}`);
+  if (named.off.length) console.log(`아는 선석 근처가 아니다 — 선석 이름 없이 실제 자리에 놓는다: ${named.off.join(' ')}`);
   if (named.held.length) console.log(`선석 경계라 지금 선석을 유지: ${named.held.join(' ')}`);
 }
 
@@ -160,8 +161,12 @@ if (capture?.kind === 'coords') {
   }
 }
 
-const plan = planMoves(rows, live);
+// 실좌표를 받았으면 실제 자리로, 이름만 받았으면(붙여넣은 글자 리스트) 선석 슬롯으로.
+const byCoords = capture?.kind === 'coords';
+const plan = byCoords ? planByCoords(rows, live) : planMoves(rows, live);
 const now = Date.now();
+/** 선석 이름. 아는 선석 밖에 놓인 배는 이름이 없다 — 지어내지 않는다. */
+const berthName = (id) => BERTH_LABEL[id] ?? '선석 밖';
 
 // 야드각을 사람이 읽는 방위로. 0=동 90=남 180=서 270=북 (test-bow-detect 기준).
 const dir = (deg) => {
@@ -172,7 +177,7 @@ const dir = (deg) => {
   return Math.abs(near[0] - d) <= 20 ? `${d}° ${near[1]}` : `${d}°`;
 };
 for (const m of plan.moves) {
-  const moved = Math.round(m.from.x) !== m.to.x || Math.round(m.from.y) !== m.to.y;
+  const moved = m.from.x !== m.to.x || m.from.y !== m.to.y;
   // ★제자리 회전(뱃머리)이면 좌표가 아니라 **각도**가 요점이다. 그걸 보여 줘야
   //  사람이 "이 배 뱃머리가 저쪽이 맞나" 를 판단할 수 있다.
   // ★`r` 은 마커 회전각이지 뱃머리 각이 아니다(90° 차이). 반드시 변환해서 찍는다 —
@@ -180,12 +185,29 @@ for (const m of plan.moves) {
   const turn = Number.isFinite(m.from.r) && m.from.r !== m.to.r
     ? `  뱃머리 ${dir(bowFromHeading(m.from.r))} → ${dir(bowFromHeading(m.to.r))}` : '';
   console.log(`이동  ${m.hull}  (${Math.round(m.from.x)},${Math.round(m.from.y)})` +
-    ` → ${BERTH_LABEL[m.berth]} (${m.to.x},${m.to.y})${moved ? '' : ' [제자리]'}` +
-    `${m.reason ? ` <${m.reason}>` : ''}${turn}`);
+    ` → ${berthName(m.berth)} (${m.to.x},${m.to.y})${moved ? '' : ' [제자리]'}` +
+    `${m.reason ? ` <${m.reason}>` : ''}${turn}` +
+    `${m.crowded ? '  ⚠ 비켜 설 데가 없어 번호가 겹친다' : ''}`);
 }
 for (const c of plan.creates)
-  console.log(`추가  ${c.hull}  → ${BERTH_LABEL[c.berth]} (${c.to.x},${c.to.y})`);
+  console.log(`추가  ${c.hull}  → ${berthName(c.berth)} (${c.to.x},${c.to.y})`);
 console.log(`그대로 ${plan.skips.length} · 시운전/출항 ${plan.sea.length} · 리스트 밖(손 안 댐) ${plan.untouched.length}`);
+
+// ── 명단에 없는 배 ──────────────────────────────────────────────────────
+// ★지우지 않는다. 문서는 그대로 두고 **명단(`present`)에서만 뺀다** — 앱이 그 명단을 보고
+//  안 그린다. 다음 수집에 다시 나오면 그 순간 다시 보인다(planByCoords 주석).
+// ★「이번에 처음 빠진 배」만 이력에 한 줄 남긴다. 매 수집마다 남기면 그게 헛줄이다.
+const absent = plan.absent ?? [];
+let prevPresent = null;
+try {
+  const meta = await getDoc(doc(db, 'meta', 'safetyone'));
+  const p = meta.exists() ? meta.data().present : null;
+  if (Array.isArray(p)) prevPresent = p.map(String);
+} catch { /* 못 읽으면 「처음」으로 본다 — 이력에 한 줄 더 남을 뿐이다 */ }
+const leaving = absent.filter(h => !prevPresent || prevPresent.includes(h));
+if (absent.length)
+  console.log(`명단에 없다(지도에서 내림 · 문서는 그대로) ${absent.length}: ${absent.join(' ')}`
+    + (leaving.length ? `  ← 이번에 빠짐: ${leaving.join(' ')}` : ''));
 for (const u of plan.unknown) console.log(`⚠ 위치 해석 실패: ${u.hull} "${u.loc}"`);
 for (const l of unknownLines) console.log(`⚠ 줄 해석 실패: "${l}"`);
 
@@ -196,21 +218,34 @@ for (const item of [...plan.moves, ...plan.creates]) {
   const pos = { x: item.to.x, y: item.to.y, r: item.to.r };
   // ★berth 는 세부 선석까지(`1안벽 A선석`). 공정관리비서가 이 문자열을 그대로 찍는다.
   //  loc 은 안벽 단위로 그대로 둔다 — 다른 화면이 쓰고 있을 수 있다(2026-09-04 사용자 지시).
-  const extra = { berth: berthLabelAt(item.berth, pos), loc: item.loc, syncedAt: now };
+  // ★아는 선석 밖에 선 배는 `berth` **필드를 없앤다**(빈 문자열이 아니라). 공정관리비서는
+  //  「필드 없음 = 위치 모름」으로 읽게 돼 있고, 빈 문자열은 빈 배지로 그대로 찍힌다.
+  const label = item.berth ? berthLabelAt(item.berth, pos) : null;
+  const extra = { loc: item.loc, syncedAt: now };
   // berth·loc·syncedAt 는 공정관리비서 연동용. 룰이 추가 필드를 막으면 좌표만 폴백.
   // 기존 배는 부분 갱신 — 통째로 갈아끼우면 좌표 밖 필드까지 건드린다.
   if (cur) {
-    try { await updateDoc(doc(db, 'ships', item.hull), { ...pos, ...extra }); }
+    try { await updateDoc(doc(db, 'ships', item.hull), { ...pos, ...extra, berth: label ?? deleteField() }); }
     catch { await updateDoc(doc(db, 'ships', item.hull), pos); }
   } else {
-    try { await setDoc(doc(db, 'ships', item.hull), { ...pos, color: 'yellow', memo: '', ...extra }); }
+    try { await setDoc(doc(db, 'ships', item.hull), { ...pos, color: 'yellow', memo: '', ...extra, ...(label ? { berth: label } : {}) }); }
     catch { await setDoc(doc(db, 'ships', item.hull), { ...pos, color: 'yellow', memo: '' }); }
   }
+  // ★이력은 **자리가 바뀐 것만.** 제자리에서 뱃머리만 돌린 것을 「~(으)로 이동」으로 적으면
+  //  안 움직인 배가 움직인 것처럼 읽힌다(실측: 8209 가 11/09·12·13 세 번 그렇게 남았다).
+  if (cur && cur.x === pos.x && cur.y === pos.y) continue;
+  const name = BERTH_LABEL[item.berth] ?? '';
   await addDoc(collection(db, 'history'), {
     // 뷰어도 보는 글귀다 — 사내 화면 이름(`3중점검`) 대신 하는 일로 적는다(칩의 「위치 확인」과 같은 말).
-    action: cur ? `${BERTH_LABEL[item.berth]}(으)로 이동 — 위치 확인` : `추가 — 위치 확인 ${BERTH_LABEL[item.berth]}`,
+    action: cur ? `${name ? `${name}(으)로 ` : ''}이동 — 위치 확인` : `추가 — 위치 확인${name ? ` ${name}` : ''}`,
     shipId: item.hull, author: '자동수집', timestamp: now,
   }).catch(() => {});   // 기록은 최선노력 — 위치 반영이 먼저다
+}
+for (const hull of leaving) {
+  await addDoc(collection(db, 'history'), {
+    // 「떠났다」고 적지 않는다 — 아는 것은 **명단에 없다**는 것뿐이다(시운전인지 인도인지 모른다).
+    action: '지도에서 내림 — 위치 확인 안 됨', shipId: hull, author: '자동수집', timestamp: now,
+  }).catch(() => {});
 }
 
 // ── 제자리 배: 확인 시각을 찍고, 선석 이름도 맞춘다 ──────────────────────
@@ -234,14 +269,15 @@ let named = 0, seen = 0;
 for (const sk of plan.skips) {
   const cur = live.get(sk.hull);
   if (!cur) continue;
-  const want = berthLabelAt(sk.berth, cur);
+  // 아는 선석 밖에 선 배는 이름이 없다 — 옛 선석 이름이 남아 있으면 필드째 없앤다.
+  const want = sk.berth ? berthLabelAt(sk.berth, cur) : null;
   const patch = { syncedAt: now };
-  const rename = want && cur.berth !== want;
-  if (rename) patch.berth = want;
+  const rename = (cur.berth || null) !== want;
+  if (rename) patch.berth = want ?? deleteField();
   try {
     await updateDoc(doc(db, 'ships', sk.hull), patch);
     seen++;
-    if (rename) { console.log(`이름  ${sk.hull}  ${cur.berth ?? '(없음)'} → ${want}`); named++; }
+    if (rename) { console.log(`이름  ${sk.hull}  ${cur.berth || '(없음)'} → ${want || '(없음)'}`); named++; }
   } catch (e) {
     console.log(`⚠ 제자리 확인 못 씀 ${sk.hull}: ${e?.code ?? e}`);
   }
@@ -251,9 +287,14 @@ console.log(`제자리 확인 ${seen}건 (자리는 안 건드림)${named ? ` ·
 // 수집 심장박동. 아무것도 안 바뀐 수집도 여기엔 남아야
 // "3시간째 그대로" 와 "수집이 죽음" 이 구분된다.
 try {
+  // ★`present` = **지금 야드에 있는 배의 명단**. 앱은 여기 없는 배를 그리지 않는다
+  //  (수집이 한 번은 본 배에 한해서 — `absentHulls`). 실좌표 수집만 명단을 새로 쓴다:
+  //  붙여넣은 글자 리스트에는 야드에 없는 호선까지 섞여 있어 명단이 될 수 없다.
+  const present = byCoords ? rows.map(r => r.hull).sort() : prevPresent;
   await setDoc(doc(db, 'meta', 'safetyone'), {
     lastSuccess: now, rows: rows.length,
     moved: plan.moves.length, created: plan.creates.length, unknown: plan.unknown.length,
+    ...(present ? { present } : {}),
   });
 } catch {
   console.log('(meta/safetyone 기록 실패 — firestore.rules 의 meta 항목이 아직 배포 전이다)');

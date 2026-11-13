@@ -1,9 +1,10 @@
 name: Sync SafetyOne positions
 
-# 세이프티원 3중점검 리스트를 긁어 십로케이션 파이어스토어에 반영한다.
-# 배는 근무시간에만 움직이고 세이프티원 갱신도 2~3시간 주기라,
-# 한국시간 06~20시 매시(UTC 21~23, 0~11)면 충분하다 — 더 자주 긁어봐야
-# 사내 서버만 때린다 (CLAUDE.md 수집 원칙).
+# 세이프티원 3중점검 지도의 배 좌표를 긁어 십로케이션 파이어스토어에 반영한다.
+# 배는 근무시간에만 움직이고 세이프티원 갱신도 2~3시간 주기라 하루 네 번
+# (KST 08/11/14/17 회차)이면 충분하다 — 더 자주 긁어봐야 사내 서버만 때린다
+# (CLAUDE.md 수집 원칙). 크론이 매시간 깨우는 것은 깃허브가 스케줄을 몇 시간씩
+# 밀고 버리기 때문이고, 실제 수집은 회차마다 한 번뿐이다(아래 `Is a collection due?`).
 #
 # 필요한 시크릿 (Settings → Secrets and variables → Actions):
 #   SAFETYONE_URL  세이프티원 접속 주소 (로그인 페이지)
@@ -32,11 +33,21 @@ on:
   #   횟수는 하루 4번으로 같고, 배가 실제로 움직이는 낮 시간에 몰아 준다.
   #   세이프티원 자체가 2~3시간마다 갱신되므로 낮의 최악 지연은 약 6시간이다(예전 9시간).
   #   밤새 움직인 배는 아침 8시 회차가 잡는다.
-  #  ★★**여기를 바꾸면 `src/lib/sync-schedule.ts` 의 `SYNC_HOURS_KST` 도 같이 바꾼다.**
-  #   앱이 그 값으로 「수집이 죽었나」를 판정한다. 갈라지면 칩이 거짓말을 한다 —
-  #   `scripts/test-sync-schedule.mjs` [4] 가 이 줄을 직접 읽어 두 값을 대조한다.
+  #  ★★**크론은 이제 「회차」가 아니라 「깨우기」다** (2026-11-13).
+  #   회차 시각(KST 08/11/14/17 정각)에 맞춰 네 줄을 걸어 뒀더니 **하루에 두 번만 돌았다** —
+  #   10/28~11/13 실행 이력 17일 연속: 낮 11:01~13:32 한 번, 밤 19:48~22:43 한 번. 깃허브가 스케줄을
+  #   3~5시간 밀고, 밀린 사이의 회차는 통째로 버린다(공식 문서: 부하가 높으면 지연·유실,
+  #   **매시 정각이 가장 붐빈다**). 아침에 옮긴 배가 점심에야 지도에 나왔다.
+  #   → 정각을 피해 **매시간 깨우기만 하고**, 돌릴지는 `scripts/sync-gate.mjs` 가 정한다
+  #     (`collectDue`: 가장 최근 회차가 아직 안 채워졌으면 돈다). 하루 수집 횟수는 그대로
+  #     최대 4번이다 — 자주 깨우는 것이지 자주 긁는 것이 아니다. 건너뛰는 실행은 10여 초다.
+  #   아침 6·7시에도 깨우는 것은 그게 두세 시간 밀려 8시 회차를 메워 주기 때문이고,
+  #   저녁 18~21시는 밀린 17시 회차를 받기 위해서다(22시가 지나면 그 회차는 버린다).
+  #  ★일정의 정본은 `src/lib/sync-schedule.ts` 의 `SYNC_HOURS_KST` **하나**다. 앱도 그 값으로
+  #   「수집이 죽었나」를 판정한다. 이 줄이 그 회차들을 전부 깨우는지는
+  #   `scripts/test-sync-schedule.mjs` [4] 가 이 파일을 직접 읽어 대조한다.
   schedule:
-    - cron: '0 2,5,8,23 * * *'   # KST 08:00 / 11:00 / 14:00 / 17:00 (UTC+9)
+    - cron: '13 21-23,0-12 * * *'   # KST 06:13 ~ 21:13 매시간 (UTC+9) — 깨우기만 한다
   workflow_dispatch:
     inputs:
       mode:
@@ -110,19 +121,26 @@ jobs:
         if: steps.precheck.outputs.ready == 'true'
         run: npm ci
 
-      - name: Cache Playwright browser
+      # ★지금 돌릴 때인가. 크론은 매시간 깨우지만 수집은 회차마다 한 번이다.
+      #  사람이 돌렸으면 묻지 않고 돈다(`due=true`). 아래 단계는 전부 이 답을 본다.
+      - name: Is a collection due?
+        id: gate
         if: steps.precheck.outputs.ready == 'true'
+        run: node scripts/sync-gate.mjs
+
+      - name: Cache Playwright browser
+        if: steps.gate.outputs.due == 'true'
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
           key: playwright-chromium-${{ runner.os }}
 
       - name: Install Chromium
-        if: steps.precheck.outputs.ready == 'true'
+        if: steps.gate.outputs.due == 'true'
         run: npx playwright install --with-deps chromium
 
       - name: Scrape SafetyOne list
-        if: steps.precheck.outputs.ready == 'true'
+        if: steps.gate.outputs.due == 'true'
         env:
           SAFETYONE_URL: ${{ secrets.SAFETYONE_URL }}
           SAFETYONE_ID: ${{ secrets.SAFETYONE_ID }}
@@ -134,7 +152,7 @@ jobs:
       # 사람이 직접 돌릴 때만 찍는다. 크론까지 매시간 좌표를 뱉으면 로그만 시끄럽고,
       # 이건 어차피 반영 전에 눈으로 보려고 있는 단계다.
       - name: Show what was collected
-        if: steps.precheck.outputs.ready == 'true' && github.event_name == 'workflow_dispatch' && inputs.mode != 'apply'
+        if: steps.gate.outputs.due == 'true' && github.event_name == 'workflow_dispatch' && inputs.mode != 'apply'
         run: |
           # 따옴표 탈출 지옥을 피하려고 heredoc 으로 파일에 쓴 뒤 돌린다.
           # 인용된 구분자('EOF')라 셸이 안쪽을 건드리지 않는다.
@@ -164,7 +182,7 @@ jobs:
       #  세이프티원 배 레이어는 선석 이름이 아니라 x·y 를 준다 — 그 좌표가 우리 야드의
       #  어디인지 확정되기 전에는 선석 이름을 붙일 수 없다.
       - name: Fit yard transform (writes nothing)
-        if: steps.precheck.outputs.ready == 'true' && inputs.mode == 'fit'
+        if: steps.gate.outputs.due == 'true' && inputs.mode == 'fit'
         run: |
           set -o pipefail
           node scripts/fit-yard-transform.mjs --input out/safetyone-list.json | tee out/fit.log
@@ -177,7 +195,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Apply to Firestore
-        if: steps.precheck.outputs.ready == 'true' && inputs.mode != 'fit'
+        if: steps.gate.outputs.due == 'true' && inputs.mode != 'fit'
         run: |
           # ★pipefail 이 없으면 tee 의 종료코드만 보게 돼 반영 실패가 초록불로 묻힌다.
           set -o pipefail

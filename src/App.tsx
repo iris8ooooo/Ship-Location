@@ -1,6 +1,6 @@
-import React, { useCallback, useEffect, useRef, useState, PointerEvent as ReactPointerEvent } from 'react';
-import { collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, addDoc, query, orderBy, limit } from 'firebase/firestore';
-import { parseListText, planMoves, BERTH_LABEL } from './lib/safetyone-match.mjs';
+import React, { useCallback, useEffect, useMemo, useRef, useState, PointerEvent as ReactPointerEvent } from 'react';
+import { collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, addDoc, query, orderBy, limit, arrayUnion } from 'firebase/firestore';
+import { parseListText, planMoves, absentHulls, BERTH_LABEL } from './lib/safetyone-match.mjs';
 import { tideInfoFrom, tideFreshness, TIDE_DOC, TIDE_STATION, type TideDoc } from './lib/tide.mjs';
 import { fetchVesselPlan, dateLabel, ddayLabel, type VesselPlan } from './lib/vessel-plan';
 import { fetchRoster, specIsDF, OPEN_ROSTER, type Roster } from './lib/vessel-roster';
@@ -216,7 +216,22 @@ const DRAG_HOLD_SLOP = 8;
     판정한다. 파이어스토어를 모르는 파일이라 브라우저 없이 그대로 돌려 검증한다. */
 
 export default function App() {
-  const [ships, setShips] = useState<Record<string, ShipData>>({});
+  /** 파이어스토어의 배 문서 **전부**. 화면은 이게 아니라 아래 `ships` 를 쓴다. */
+  const [shipDocs, setShipDocs] = useState<Record<string, ShipData>>({});
+  /** 마지막 수집의 야드 명단(meta/safetyone.present). 못 읽었으면 null — 그때는 아무도 안 숨긴다. */
+  const [present, setPresent] = useState<string[] | null>(null);
+  /**
+   * 지도에 **그리는** 배. 수집이 한 번은 본 배인데 마지막 명단에 없으면 뺀다
+   * (2026-11-13: 11~58일 전에 야드를 떠난 배 6척이 그대로 그려져 있었고, 그 자리에 새로
+   * 들어온 배 2척은 빈 바다에 가 있었다). 문서는 지우지 않으므로 명단에 다시 나오면
+   * 그 순간 다시 보인다. 판정은 수집과 **같은 함수**(`absentHulls`)다 — 수집이 「없다」고
+   * 본 배와 화면이 숨기는 배가 갈라지면 안 된다.
+   */
+  const ships = useMemo(() => {
+    const gone = absentHulls(shipDocs, present);
+    if (!gone.size) return shipDocs;
+    return Object.fromEntries(Object.entries(shipDocs).filter(([id]) => !gone.has(id))) as Record<string, ShipData>;
+  }, [shipDocs, present]);
   const [zones, setZones] = useState<Record<string, ZoneData>>({});
   const [selectedShipId, setSelectedShipId] = useState<string | null>(null);
   const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
@@ -793,10 +808,11 @@ export default function App() {
       snap => {
         const d = snap.exists() ? (snap.data() as any) : null;
         setLastSync(d?.lastSuccess ?? null);
+        setPresent(Array.isArray(d?.present) ? d.present.map(String) : null);
         setSyncFail(typeof d?.lastFailure === 'number'
           ? { at: d.lastFailure, code: String(d.failCode ?? 'other') } : null);
       },
-      () => { setLastSync(null); setSyncFail(null); });
+      () => { setLastSync(null); setPresent(null); setSyncFail(null); });
     return () => unsub();
   }, []);
 
@@ -949,7 +965,7 @@ export default function App() {
     const unsubscribe = onSnapshot(shipsRef, (snapshot) => {
       const data: Record<string, ShipData> = {};
       snapshot.forEach(doc => { data[doc.id] = doc.data() as ShipData; });
-      setShips(prev => {
+      setShipDocs(prev => {
         const next = { ...data };
         if (draggingRef.current && draggingRef.current.type === 'ship') {
           const draggingId = draggingRef.current.id;
@@ -997,7 +1013,8 @@ export default function App() {
     const now = Date.now();
     try {
       for (const item of [...syncPlan.moves, ...syncPlan.creates]) {
-        const cur = (ships as Record<string, any>)[item.hull];
+        // 지도에서 내려가 있던 배도 문서는 있다 — 통째로 갈아끼우지 않게 **문서 전부**에서 찾는다.
+        const cur = (shipDocs as Record<string, any>)[item.hull];
         const pos = { x: item.to.x, y: item.to.y, r: item.to.r };
         // berth·loc·syncedAt 는 공정관리비서 연동용. 룰이 추가 필드를 막으면
         // 거부되므로, 그때는 좌표만이라도 쓴다. 기존 배는 부분 갱신 — 문서를
@@ -1013,10 +1030,15 @@ export default function App() {
         logAction(`${BERTH_LABEL[item.berth]}(으)로 이동 — 지도 붙여넣기`, item.hull);
       }
       // 수집 심장박동 — 룰의 meta 항목이 배포되기 전이면 조용히 실패한다.
+      // ★`merge` 로 쓴다. 통째로 갈아끼우면 자동수집이 남긴 야드 명단(`present`)이 사라져
+      //  지도에서 내려간 배가 전부 되살아난다. 방금 옮긴 배는 명단에 더한다 —
+      //  사람이 「여기 있다」고 한 배가 숨으면 안 된다.
+      const touched = [...syncPlan.moves, ...syncPlan.creates].map(i => i.hull);
       setDoc(doc(db, 'meta', 'safetyone'), {
         lastSuccess: now, rows: syncPlan.moves.length + syncPlan.creates.length + syncPlan.skips.length,
         moved: syncPlan.moves.length, created: syncPlan.creates.length, unknown: syncPlan.unknown.length,
-      }).catch(() => {});
+        ...(present && touched.length ? { present: arrayUnion(...touched) } : {}),
+      }, { merge: true }).catch(() => {});
       setSyncText(''); setSyncPlan(null); setSyncOpen(false);
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, 'ships');

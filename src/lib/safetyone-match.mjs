@@ -151,11 +151,13 @@ export const LABEL_W = 18, LABEL_L = 88;
  *  선체가 아니라 **번호가 읽히는 것**이므로 번호 칸으로 잰다.
  *
  *  r 이 0/180 이면 번호가 세로로 길고, 90/270 이면 가로로 길다.
+ *  `w` 는 뱃전 방향으로 볼 폭이다. 기본은 번호 칸이고, 새로 놓을 자리를 고를 때만
+ *  선체 폭(`HULL_W`)을 넣어 더 넉넉히 본다(planByCoords).
  */
-export function labelsHidden(a, b) {
+export function labelsHidden(a, b, w = LABEL_W) {
   const half = (p) => (((p.r ?? 0) % 180 + 180) % 180 === 0)
-    ? { x: LABEL_W / 2, y: LABEL_L / 2 }
-    : { x: LABEL_L / 2, y: LABEL_W / 2 };
+    ? { x: w / 2, y: LABEL_L / 2 }
+    : { x: LABEL_L / 2, y: w / 2 };
   const A = half(a), B = half(b);
   return Math.abs(a.x - b.x) < A.x + B.x && Math.abs(a.y - b.y) < A.y + B.y;
 }
@@ -178,15 +180,10 @@ export function berthOfPos(pos) {
 }
 
 /**
- * 이동 계획을 세운다.
- * @param rows  [{hull, loc, at?}] — 리스트에서 읽은 것.
- *   `at: {x, y}` 는 세이프티원 실좌표를 우리 야드 좌표로 옮긴 **실제 자리**다
- *   (src/lib/yard-transform.mjs). 있으면 슬롯 대신 그 자리에 놓는다.
- *   ★슬롯을 쓰던 이유는 "리스트가 구간 안 순서를 주지 않아서" 였다(CLAUDE.md).
- *    이제 좌표를 알므로 그 제약이 없다 — 임의의 빈 슬롯보다 실제 자리가 언제나 낫다.
- *    다만 **선석이 같으면 안 옮긴다**는 규칙은 그대로다. 관리자가 손으로 다듬은 자리를
- *    매 수집마다 12px 씩 흔들 이유가 없다.
- * @param live  Map(hull → {x, y, r, ...}) — 파이어스토어의 현재 배들
+ * 이동 계획을 세운다 — **선석 이름만 아는 입력**용(관리자 「지도 붙여넣기」의 글자 리스트).
+ * 자동수집은 실좌표를 알므로 이 함수가 아니라 `planByCoords` 를 쓴다.
+ * @param rows  [{hull, loc}] — 리스트에서 읽은 것.
+ * @param live  Map(hull → {x, y, r, ...}) — 지도에 **보이는** 배들
  * @returns { moves, creates, skips, sea, unknown, untouched }
  */
 /**
@@ -273,22 +270,6 @@ export function planMoves(rows, live) {
     }
     let berth = c.berth;
     let slot;
-    if (c.at) {
-      // 실제 자리를 안다 — 슬롯을 고를 필요가 없다. 회전은 축만 세이프티원(c.axisR)이
-      // 정하고 앞뒤는 지금 값을 지킨다(shipHeading).
-      const want = { x: Math.round(c.at.x), y: Math.round(c.at.y),
-                     r: shipHeading(c.cur?.r, c.axisR, BERTH_SLOTS[berth][0].r, c.bowDeg) };
-      // ★단, 그 자리에 이미 배가 있으면 놓지 않는다 (2026-08-29 실제로 겹쳤다).
-      //  8265 를 실좌표 (83,575) 에 놓았더니 8206(75,560) 과 8px·15px 차이라
-      //  마커 폭 26px 안에서 완전히 포개졌다. 세이프티원 좌표로도 둘은 21px 차이 —
-      //  즉 실제로 나란히 붙어 있는(이중 계류) 배들이고, 좌표가 틀린 게 아니라
-      //  **그 간격이 마커 폭보다 좁은** 것이다. 지도에서는 겹치면 안 되므로
-      //  그럴 때는 그 선석의 빈 슬롯(이중 계류 자리 포함)으로 물러난다.
-      if (!occupied.some(o => labelsHidden(o, want))) {
-        slot = want;
-        occupied.push({ ...want });
-      }
-    }
     if (!slot) {
       slot = takeSlot(berth);
       if (!slot) { slot = takeSlot('waiting'); berth = 'waiting'; }
@@ -341,4 +322,185 @@ export function planMoves(rows, live) {
   }
 
   return { moves, creates, skips, sea, unknown, untouched };
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// 실좌표 배치 (2026-11-13) — 자동수집이 쓰는 길
+// ════════════════════════════════════════════════════════════════════════════
+//
+// ★★왜 따로인가 — 「선석이 같으면 안 옮긴다」가 지도를 조용히 틀리게 만들고 있었다.
+//  그 규칙은 리스트가 **선석 이름만** 주던 때의 것이다. 이름만 알면 구간 안 어디인지
+//  모르므로 손으로 다듬은 자리를 지키는 게 맞았다. 그런데 2026-08-29 부터 수집은
+//  **실좌표**를 준다 — 그 뒤로도 판정은 이름으로 했고, 그래서 같은 선석 안에서 옮긴 배는
+//  영영 안 따라갔다.
+//  실측 2026-11-13 (리스트 24척을 실좌표와 한 척씩 대조):
+//    · 도크·1BERTH 안 남↔북이 뒤바뀜  8293 131px · 8301 134px · 8316 138px · 8255 111px
+//    · 2안벽 **A선석**에 있는 8323 이 **B선석**에 그려짐 (168px) — 선석 이름까지 틀렸다
+//    · 8248 82px · 8283 54px · 8262 48px
+//    · 8206(플로팅)·8292(1돌핀)은 왼쪽 아래 빈 바다 「대기」에 — 897px · 432px
+//  **24척 중 10척이 틀린 자리**였고, 에러는 한 줄도 없었다(전부 「그대로 22」로 읽혔다).
+//
+// ★대기열로 간 두 척의 원인은 **떠난 배**였다. 리스트에서 빠진 배를 「손대지 않는다」로
+//  남겨 두면서 **자리 주인으로는 계속 쳤다.** 11~58일 전에 빠진 6척이 플로팅·1돌핀을
+//  차지한 채 남아, 새로 들어온 배가 제 자리에 못 서고 대기열로 밀렸다. 그리고 대기열은
+//  어느 선석도 아니라 다음 수집마다 다시 「이동」으로 읽혀 **이력에 하루 두 번씩 헛줄**이
+//  쌓였다(11/06 부터). 공정관리비서에는 `배송지: 대기` 가 나갔다.
+//
+// 규칙은 넷뿐이다:
+//  ① **실제 자리가 정답이다.** 저장된 자리가 `SAME_SPOT_PX` 넘게 떨어져 있으면 옮긴다 —
+//     선석 이름이 같든 다르든.
+//  ② 그 안이면 안 건드린다(손으로 다듬은 자리 · 매 수집마다 흔들지 않기).
+//  ③ 옆 배와 포개지면 **멀리 보내지 않고 뱃전 쪽으로 조금만** 비켜 선다.
+//  ④ **지도에 안 보이는 배는 자리를 차지하지 않는다**(`absentHulls`).
+
+/**
+ * 저장된 자리가 실제 자리에서 이 안(px, 직선거리)이면 **같은 자리**로 본다.
+ *
+ * ★지켜야 할 것이 정한 값이다: 좌표 변환의 **실측 최대 오차가 23.4px**(yard-transform).
+ *  그보다 작게 잡으면 변환식이 틀린 자리를 사람이 바로잡아도 다음 수집이 되돌린다 —
+ *  바로잡은 자리가 살아남으려면 최대 오차를 덮어야 한다. 그보다 크게 잡을 이유는 없다:
+ *  실제 이동은 이보다 훨씬 크다(2026-11-13 에 잰 가장 작은 것이 48px, 도크 남↔북은 131px~).
+ */
+export const SAME_SPOT_PX = 25;
+
+/** 지도 좌표계(App.tsx `YARD_W`·`YARD_H` 와 같은 값). 이 밖의 좌표는 그릴 자리가 없다. */
+const YARD = { w: 1380, h: 840 };
+
+/**
+ * 선체 폭(App.tsx 마커 `w-[26px]`). **새로 놓는 배**는 옆 배와 이만큼 띄운다.
+ *
+ * ★번호 칸(18px)만 띄우면 번호는 안 가려지지만 선체가 8px 포개져, 나란히 선 두 척의
+ *  숫자가 한 덩어리로 읽힌다(2026-11-13 실제로 렌더해서 봤다: 8248·8247 이 「88/22/44/87」).
+ *  실제 배들은 이중 계류라 지도에서 16~22px 간격인데 마커는 26px 다 — 그래서 몇 px 는
+ *  벌려 그릴 수밖에 없고, 그 몇 px 는 좌표 오차(RMS 12.7px)보다 작다.
+ * ★**이미 서 있는 배에는 이 잣대를 대지 않는다.** 그쪽은 여전히 번호 칸으로 잰다 —
+ *  선체로 재면 멀쩡한 배를 매 수집마다 옮기게 된다(2026-08-29). 옮기는 김에 잘 놓는 것뿐이다.
+ */
+const HULL_W = 26;
+
+/** 옆으로 비켜 설 수 있는 한계 — 선체 폭 둘(세 척이 나란히 붙은 경우까지). */
+const STEP_ASIDE_MAX = HULL_W * 2;
+
+const normR = (r) => ((((r ?? 0) % 360) + 360) % 360);
+
+/**
+ * 지도에 **그리지 않을** 배: 수집이 한 번은 본 배(`syncedAt`)인데 마지막 명단에 없다.
+ *
+ * ★지우지 않는다 — 문서는 그대로 두고 **안 그릴 뿐**이다. 세이프티원이 잠깐 빠뜨린 것과
+ *  진짜로 떠난 것을 기계는 못 가르지만, 안 그리는 것은 되돌릴 게 없다: 다음 명단에
+ *  다시 나오면 그 순간 다시 보인다. (그래서 수집에 삭제 권한을 줄 필요가 없다.)
+ * ★`syncedAt` 이 없는 배는 **사람이 손으로 놓은 배**다. 수집이 모르는 배이므로 그대로 둔다.
+ * ★명단이 없으면 **아무도 안 숨긴다**(fail open) — 못 읽은 것을 「다 떠났다」로 읽지 않는다.
+ *
+ * @param ships   Map 또는 객체 (호선 → 문서)
+ * @param present 마지막 수집 명단(호선번호 배열)
+ * @returns Set(호선)
+ */
+export function absentHulls(ships, present) {
+  const out = new Set();
+  if (!Array.isArray(present) || !present.length) return out;
+  const here = new Set(present.map(String));
+  const entries = ships instanceof Map ? ships.entries() : Object.entries(ships ?? {});
+  for (const [hull, s] of entries)
+    if (!here.has(hull) && Number.isFinite(s?.syncedAt)) out.add(hull);
+  return out;
+}
+
+/** 옆 배와 `w` 만큼 안 떨어지면 **뱃전 쪽으로** 가장 가까운 빈자리. 없으면 null.
+ *  ★옆으로만 본다: 포개지는 건 나란히 붙은(이중 계류) 배들이고, 실제 배 폭(약 15~22px)이
+ *   마커보다 좁아서 생긴다. 길이 방향으로 밀면 88px 를 가야 풀린다. */
+function stepAside(to, placed, w) {
+  const side = normR(to.r) % 180 === 0 ? 'x' : 'y';      // 선체가 세로로 서 있으면 옆은 x
+  for (let d = 1; d <= STEP_ASIDE_MAX; d++)
+    for (const sign of [1, -1]) {
+      const p = { ...to, [side]: to[side] + sign * d };
+      if (!placed.some(q => labelsHidden(q, p, w))) return p;
+    }
+  return null;
+}
+
+/**
+ * 실좌표로 이동 계획을 세운다.
+ * @param rows [{hull, loc, at:{x,y}, axisR?, bowDeg?}] — `at` 은 세이프티원 실좌표를 야드
+ *   좌표로 옮긴 **실제 자리**(yard-transform `namedRowsFromCoords`). `loc` 은 그 자리의
+ *   선석 이름이고, 아는 선석 근처가 아니면 빈 문자열이다 — 그래도 **자리는 놓는다.**
+ * @param live Map(hull → 문서) — 파이어스토어의 배 전부
+ * @returns { moves, creates, skips, sea, unknown, untouched, absent }
+ *   absent: 명단에 없어 지도에서 내릴 호선 / untouched: 손으로 놓은 배(그대로 둔다)
+ */
+export function planByCoords(rows, live) {
+  const moves = [], creates = [], skips = [], unknown = [], untouched = [];
+  const listed = new Set(rows.map(r => r.hull));
+  const absent = absentHulls(live, [...listed]);
+
+  // 지도에 **보이는** 배들의 최종 자리. 번호가 가려지는지는 이 목록과 견준다.
+  const placed = [];
+  for (const [hull, s] of live) {
+    if (listed.has(hull) || absent.has(hull)) continue;
+    untouched.push(hull);
+    placed.push({ x: s.x, y: s.y, r: s.r ?? 0 });
+  }
+
+  /** 그 선석의 관례 방향. 이름 없는 자리면 세이프티원이 준 축, 그것도 없으면 지금 값. */
+  const fallbackR = (c) => c.berth ? BERTH_SLOTS[c.berth][0].r : (c.axisR ?? normR(c.cur?.r));
+
+  const keep = [], go = [];
+  for (const row of rows) {
+    const cur = live.get(row.hull), at = row.at;
+    const onMap = at && at.x >= 0 && at.x <= YARD.w && at.y >= 0 && at.y <= YARD.h;
+    if (!onMap) {
+      // 그릴 자리가 없다 — 추측하지 않고 보고한다. 지금 자리에는 그대로 보이므로 장애물이다.
+      unknown.push({ ...row, loc: at ? '지도 밖' : '좌표 없음' });
+      if (cur) placed.push({ x: cur.x, y: cur.y, r: cur.r ?? 0 });
+      continue;
+    }
+    const c = { ...row, berth: berthFromLoc(row.loc), cur,
+                off: cur ? Math.hypot(cur.x - at.x, cur.y - at.y) : Infinity };
+    (c.off <= SAME_SPOT_PX ? keep : go).push(c);
+  }
+
+  // ── 제자리인 배. 실제 자리에 가까운 쪽부터 자리를 인정한다 ──────────────────
+  keep.sort((a, b) => a.off - b.off || a.hull.localeCompare(b.hull));
+  for (const c of keep) {
+    const curR = normR(c.cur.r);
+    // 세이프티원이 축도 뱃머리도 말해 주지 않으면 방향은 건드리지 않는다(추측 금지).
+    const want = (c.axisR == null && c.bowDeg == null)
+      ? curR : shipHeading(curR, c.axisR, fallbackR(c), c.bowDeg);
+    const p = { x: c.cur.x, y: c.cur.y, r: want };
+    // 제자리끼리 번호가 가려지면 어긋난 쪽이 다시 놓인다 — 한 번 겹쳐 써지면 다음 수집부터
+    // 계속 「그대로」로 읽혀 영영 겹친 채 남는다(2026-08-29 8265).
+    if (placed.some(q => labelsHidden(q, p))) { go.push({ ...c, reason: '겹침' }); continue; }
+    placed.push(p);
+    if (want === curR) { skips.push(c); continue; }
+    const axisSame = c.axisR == null || curR % 180 === c.axisR % 180;
+    moves.push({ hull: c.hull, loc: c.loc, berth: c.berth, to: p,
+                 from: { x: c.cur.x, y: c.cur.y, r: curR }, reason: axisSame ? '뱃머리' : '축' });
+  }
+
+  // ── 옮길 배·새 배. 호선 순으로 — 같은 입력이면 언제나 같은 계획이 나와야 한다 ──
+  go.sort((a, b) => a.hull.localeCompare(b.hull));
+  for (const c of go) {
+    const real = { x: Math.round(c.at.x), y: Math.round(c.at.y),
+                   r: shipHeading(c.cur?.r, c.axisR, fallbackR(c), c.bowDeg) };
+    // 옆 배와 선체가 안 포개지는 자리를 먼저 찾고, 없으면 번호만이라도 안 가려지는 자리.
+    let to = null;
+    for (const w of [HULL_W, LABEL_W]) {
+      to = placed.some(q => labelsHidden(q, real, w)) ? stepAside(real, placed, w) : real;
+      if (to) break;
+    }
+    // 비켜 설 데도 없으면 **실제 자리에 그대로** 놓는다. 번호가 가려지는 것은 눈에 보이는
+    // 문제지만, 엉뚱한 데 가 있는 것은 아무도 모르는 문제다.
+    const crowded = !to;
+    if (crowded) to = real;
+    placed.push(to);
+    // 이미 그 자리 그 방향이면 옮긴 게 아니다 — 이력을 더럽히지 않는다.
+    if (c.cur && c.cur.x === to.x && c.cur.y === to.y && normR(c.cur.r) === to.r) { skips.push(c); continue; }
+    const item = { hull: c.hull, loc: c.loc, berth: c.berth, to,
+                   from: c.cur ? { x: c.cur.x, y: c.cur.y, r: normR(c.cur.r) } : null };
+    if (c.reason) item.reason = c.reason;
+    if (crowded) item.crowded = true;
+    (c.cur ? moves : creates).push(item);
+  }
+
+  return { moves, creates, skips, sea: [], unknown, untouched, absent: [...absent].sort() };
 }
